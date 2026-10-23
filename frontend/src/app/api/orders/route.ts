@@ -1,12 +1,11 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
-const supabaseUrl =
-  process.env.NEXT_PUBLIC_SUPABASE_URL || "https://wbkyektreqlpylbclvic.supabase.co";
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 const supabaseAnonKey =
   process.env.SUPABASE_SERVICE_ROLE_KEY ||
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6India3lla3RyZXFscHlsYmNsdmljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI2ODUwNDEsImV4cCI6MjEwODI2MTA0MX0.YGhtexU-VlBfcefCnHr6uNhiXQgV_FMmB1hOQAxA5Ew";
+  "";
 
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
 

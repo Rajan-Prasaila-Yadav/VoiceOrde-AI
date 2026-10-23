@@ -1,5 +1,5 @@
 # Supabase Configuration for VoiceOrder AI
-project_id = "wbkyektreqlpylbclvic"
+project_id = "your-project-ref"
 
 [api]
 enabled = true

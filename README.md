@@ -54,13 +54,13 @@ When importing this repository into [Vercel](https://vercel.com), add the follow
 
 | Variable Name | Required | Example / Production Value | Description |
 |---|---|---|---|
-| `NEXT_PUBLIC_SUPABASE_URL` | **Yes** | `https://wbkyektreqlpylbclvic.supabase.co` | Supabase Project URL |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | **Yes** | `eyJhbGciOiJIUzI1NiIsInR5cCI...` | Supabase Public Anonymous Key |
+| `NEXT_PUBLIC_SUPABASE_URL` | **Yes** | `https://your-project-ref.supabase.co` | Supabase Project URL |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | **Yes** | `your-supabase-anon-key-here` | Supabase Public Anonymous Key |
 | `NEXT_PUBLIC_APP_URL` | **Yes** | `https://your-vercel-domain.vercel.app` | Production app domain URL |
 | `NEXT_PUBLIC_DEFAULT_SHOP_ID` | Optional | `00000000-0000-0000-0000-000000000001` | Default Kirana shop UUID |
 | `GNANI_API_KEY` | Optional | `your-gnani-api-key` | Gnani AI API Key (from app.gnani.ai) |
 | `GNANI_API_BASE_URL` | Optional | `https://api.gnani.ai/v1` | Gnani AI Base Endpoint |
-| `DATABASE_URL` | Optional | `postgresql://postgres:...` | Direct PostgreSQL connection string |
+| `DATABASE_URL` | Optional | `postgresql://postgres:[PASSWORD]@db.[PROJECT-REF].supabase.co:5432/postgres` | Direct PostgreSQL connection string |
 
 > **Note for Vercel Root Directory:**  
 > In your Vercel Project Settings, set **Root Directory** to `frontend` (or leave as root since `vercel.json` is configured).
@@ -77,7 +77,7 @@ To enable Google Sign-In on your deployed Vercel domain:
    - `http://localhost:3000` *(for local testing)*
    - `https://your-app-name.vercel.app` *(your production Vercel URL)*
 4. Under **Authorized Redirect URIs**, add:
-   - `https://wbkyektreqlpylbclvic.supabase.co/auth/v1/callback` *(Supabase Auth Callback)*
+   - `https://your-project-ref.supabase.co/auth/v1/callback` *(Supabase Auth Callback)*
    - `http://localhost:3000/auth/callback`
    - `https://your-app-name.vercel.app/auth/callback`
 5. In your [Supabase Dashboard](https://supabase.com/dashboard) → **Authentication → URL Configuration**:
@@ -112,8 +112,8 @@ npm install
 ### 2. Configure Environment
 Copy `.env.example` to `frontend/.env.local` and add your Supabase credentials:
 ```bash
-NEXT_PUBLIC_SUPABASE_URL="https://wbkyektreqlpylbclvic.supabase.co"
-NEXT_PUBLIC_SUPABASE_ANON_KEY="your-anon-key"
+NEXT_PUBLIC_SUPABASE_URL="https://your-project-ref.supabase.co"
+NEXT_PUBLIC_SUPABASE_ANON_KEY="your-anon-key-here"
 NEXT_PUBLIC_APP_URL="http://localhost:3000"
 ```
 
@@ -132,8 +132,8 @@ npm run build
 
 ## 👥 Default Demo Credentials
 - **Role**: Store Owner / Admin
-- **Email**: `rajanprasaila@gmail.com`
-- **Password**: `Rajan123@`
+- **Email**: `admin@kirana.store` *(or your registered email in app_users)*
+- **Password**: `YourSecurePassword123`
 - **Google Sign-In**: Supported via Supabase OAuth
 
 ---

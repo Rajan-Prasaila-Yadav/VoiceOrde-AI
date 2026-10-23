@@ -6,9 +6,9 @@ import { createClient } from "@supabase/supabase-js";
 import { PrismaClient } from "@prisma/client";
 import { ProductInput } from "@/types";
 
-const supabaseUrl = process.env.SUPABASE_URL || "https://wbkyektreqlpylbclvic.supabase.co";
+const supabaseUrl = process.env.SUPABASE_URL || "";
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || "";
-const supabase = supabaseKey ? createClient(supabaseUrl, supabaseKey) : null;
+const supabase = (supabaseUrl && supabaseKey) ? createClient(supabaseUrl, supabaseKey) : null;
 
 let prisma: PrismaClient | null = null;
 try {
