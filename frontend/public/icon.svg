@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#059669" />
+      <stop offset="50%" stop-color="#10b981" />
+      <stop offset="100%" stop-color="#0d9488" />
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="12" stdDeviation="16" flood-color="#000" flood-opacity="0.3" />
+    </filter>
+  </defs>
+
+  <!-- Rounded App Icon Background -->
+  <rect width="512" height="512" rx="128" fill="url(#bg)" />
+
+  <!-- Inner Subtle Ring -->
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="none" stroke="#ffffff" stroke-width="4" stroke-opacity="0.2" />
+
+  <!-- Shopping Basket / Bag Silhouette -->
+  <g filter="url(#shadow)">
+    <!-- Bag Handle -->
+    <path d="M 196 200 A 60 60 0 0 1 316 200" fill="none" stroke="#ffffff" stroke-width="24" stroke-linecap="round" />
+
+    <!-- Bag Body -->
+    <path d="M 148 200 L 364 200 L 340 376 A 28 28 0 0 1 312 404 L 200 404 A 28 28 0 0 1 172 376 Z" fill="#ffffff" fill-opacity="0.95" />
+
+    <!-- Voice Soundwaves / Microphone in Center of Bag -->
+    <!-- Mic Capsule -->
+    <rect x="236" y="240" width="40" height="72" rx="20" fill="#059669" />
+    <!-- Mic Stand Arc -->
+    <path d="M 216 284 A 40 40 0 0 0 296 284" fill="none" stroke="#059669" stroke-width="12" stroke-linecap="round" />
+    <line x1="256" y1="324" x2="256" y2="352" stroke="#059669" stroke-width="12" stroke-linecap="round" />
+    <line x1="232" y1="352" x2="280" y2="352" stroke="#059669" stroke-width="12" stroke-linecap="round" />
+
+    <!-- Spoken Wave Accents Left & Right -->
+    <path d="M 188 276 A 64 64 0 0 0 188 300" fill="none" stroke="#059669" stroke-width="8" stroke-linecap="round" />
+    <path d="M 324 276 A 64 64 0 0 1 324 300" fill="none" stroke="#059669" stroke-width="8" stroke-linecap="round" />
+  </g>
+</svg>
