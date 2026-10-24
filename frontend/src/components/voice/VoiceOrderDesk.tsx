@@ -104,6 +104,7 @@ export function VoiceOrderDesk() {
     },
   ]);
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const [isGnaniVoice, setIsGnaniVoice] = useState(false);
   const [readyToConfirm, setReadyToConfirm] = useState(false);
 
   // Manual Quick Catalogue Search state
@@ -113,6 +114,7 @@ export function VoiceOrderDesk() {
 
   const latestTranscriptRef = useRef("");
   const chatBottomRef = useRef<HTMLDivElement>(null);
+  const gnaniAudioRef = useRef<HTMLAudioElement | null>(null);
 
   // Scroll chat to bottom on new messages
   useEffect(() => {
@@ -241,24 +243,67 @@ export function VoiceOrderDesk() {
     setOrderItems((prev) => prev.filter((it) => it.productId !== productId));
   };
 
-  // Text-To-Speech: Reads Kirana AI answer aloud cleanly to the customer
-  const speakResponse = (text: string, speakLang?: string) => {
+  // Text-To-Speech: Reads Kirana AI answer aloud cleanly using Gnani Timbre v2.5 Neural TTS
+  const speakResponse = async (text: string, speakLang?: string) => {
+    // Stop any currently playing audio
+    stopSpeaking();
+
+    // Clean speech text so TTS never says "dot", "bracket", "bullet", or reads symbols
+    const cleanText = text
+      .replace(/[*_#`~•]/g, " ")
+      .replace(/\([^)]*\)/g, " ") // removes anything in parentheses like (₹105)
+      .replace(/₹\s*(\d+)/g, "$1 rupaye ")
+      .replace(/₹/g, " rupaye ")
+      .replace(/https?:\/\/\S+/g, "")
+      .replace(/[\\/|]/g, " ")
+      .replace(/\s+/g, " ")
+      .replace(/\bdot\b/gi, "")
+      .replace(/\.+$/g, "") // remove trailing dot
+      .trim();
+
+    if (!cleanText) return;
+
+    // 1. Primary: Real Gnani AI Timbre v2.5 Neural Voice API
+    try {
+      const res = await fetch("/api/gnani/tts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text: cleanText,
+          language: speakLang || selectedLanguage || "hi-IN",
+          voice: "Nalini",
+        }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data.audioUrl) {
+          const audio = new Audio(data.audioUrl);
+          gnaniAudioRef.current = audio;
+          setIsSpeaking(true);
+          setIsGnaniVoice(true);
+
+          audio.onended = () => {
+            setIsSpeaking(false);
+            setIsGnaniVoice(false);
+            gnaniAudioRef.current = null;
+          };
+          audio.onerror = () => {
+            setIsSpeaking(false);
+            setIsGnaniVoice(false);
+            gnaniAudioRef.current = null;
+          };
+
+          await audio.play();
+          return;
+        }
+      }
+    } catch (gnaniErr) {
+      console.warn("[Gnani Timbre Voice Notice]: Falling back to local synthesizer", gnaniErr);
+    }
+
+    // 2. Fallback: Browser SpeechSynthesis
     if (typeof window !== "undefined" && "speechSynthesis" in window) {
-      window.speechSynthesis.cancel();
-
-      // Clean speech text so TTS never says "dot", "bracket", "bullet", or reads symbols
-      let cleanText = text
-        .replace(/[*_#`~•]/g, " ")
-        .replace(/\([^)]*\)/g, " ") // removes anything in parentheses like (₹105)
-        .replace(/₹\s*(\d+)/g, "$1 rupaye ")
-        .replace(/₹/g, " rupaye ")
-        .replace(/https?:\/\/\S+/g, "")
-        .replace(/[\\/|]/g, " ")
-        .replace(/\s+/g, " ")
-        .replace(/\bdot\b/gi, "")
-        .replace(/\.+$/g, "") // remove trailing dot
-        .trim();
-
       const utterance = new SpeechSynthesisUtterance(cleanText);
 
       // Determine proper speech voice language
@@ -276,19 +321,36 @@ export function VoiceOrderDesk() {
 
       utterance.rate = 1.0;
       utterance.pitch = 1.0;
-      utterance.onstart = () => setIsSpeaking(true);
-      utterance.onend = () => setIsSpeaking(false);
-      utterance.onerror = () => setIsSpeaking(false);
+      utterance.onstart = () => {
+        setIsSpeaking(true);
+        setIsGnaniVoice(false);
+      };
+      utterance.onend = () => {
+        setIsSpeaking(false);
+        setIsGnaniVoice(false);
+      };
+      utterance.onerror = () => {
+        setIsSpeaking(false);
+        setIsGnaniVoice(false);
+      };
       window.speechSynthesis.speak(utterance);
     }
   };
 
   // Stop TTS immediately (Barge-in / Stop voice)
   const stopSpeaking = () => {
+    if (gnaniAudioRef.current) {
+      try {
+        gnaniAudioRef.current.pause();
+        gnaniAudioRef.current.currentTime = 0;
+      } catch (e) {}
+      gnaniAudioRef.current = null;
+    }
     if (typeof window !== "undefined" && "speechSynthesis" in window) {
       window.speechSynthesis.cancel();
     }
     setIsSpeaking(false);
+    setIsGnaniVoice(false);
   };
 
   // Voice recording toggle with automatic AI voice stop
@@ -701,7 +763,9 @@ export function VoiceOrderDesk() {
             {isRecording
               ? "Listening... Speak your order or question"
               : isSpeaking
-              ? "AI is speaking... Tap mic or Stop button to interrupt"
+              ? isGnaniVoice
+                ? "🔊 Gnani AI Timbre v2.5 (Nalini) speaking... Tap mic or Stop to interrupt"
+                : "AI is speaking... Tap mic or Stop to interrupt"
               : "Tap Mic to Speak (बोलिए - भाव पूछें, साइज बताएं, या आर्डर दें)"}
           </span>
         </div>

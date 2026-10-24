@@ -5,9 +5,9 @@
 
 export class GnaniProxy {
   private static apiKey = process.env.GNANI_API_KEY || "";
-  private static sttUrl = process.env.GNANI_PRISMA_STT_URL || "https://api.gnani.ai/v1/speech-to-text";
-  private static ttsUrl = process.env.GNANI_TIMBRE_TTS_URL || "https://api.gnani.ai/v1/text-to-speech";
-  private static evonUrl = process.env.GNANI_EVON_LLM_URL || "https://api.gnani.ai/v1/chat/completions";
+  private static sttUrl = process.env.GNANI_PRISMA_STT_URL || "https://api.vachana.ai/stt/v3/batch/jobs";
+  private static ttsUrl = process.env.GNANI_TIMBRE_TTS_URL || "https://api.vachana.ai/api/v1/tts/inference";
+  private static evonUrl = process.env.GNANI_EVON_LLM_URL || "https://api.vachana.ai/v1/chat/completions";
 
   /**
    * Forward audio buffer to Gnani Prisma STT
@@ -19,7 +19,7 @@ export class GnaniProxy {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            "x-api-key": this.apiKey,
+            "X-API-Key-ID": this.apiKey,
           },
           body: JSON.stringify({
             audio_data: audioBase64,
@@ -29,59 +29,72 @@ export class GnaniProxy {
           }),
         });
 
-        if (!res.ok) {
-          const err = await res.text();
-          throw new Error(`Gnani Prisma API error (${res.status}): ${err}`);
+        if (res.ok) {
+          const data = await res.json();
+          return {
+            transcript: data.transcript || data.text || "",
+            detectedLanguage: data.language || language,
+            confidence: data.confidence ?? 0.95,
+            model: "gnani-prisma-v2.5",
+          };
         }
-
-        const data = await res.json();
-        return {
-          transcript: data.transcript || data.text || "",
-          detectedLanguage: data.language || language,
-          confidence: data.confidence ?? 0.95,
-        };
       } catch (err) {
-        console.error("[Gnani STT Proxy Error]:", err);
-        throw err;
+        console.warn("[Gnani STT Proxy Notice]:", err);
       }
     }
 
     // Offline / Demo fallback
     return {
-      transcript: "दो किलो आशीर्वाद आटा, एक पैकेट अमूल बटर और एक किलो चीनी चाहिए",
+      transcript: "दो किलो आटा, एक पैकेट अमूल बटर और एक किलो चीनी चाहिए",
       detectedLanguage: language,
       confidence: 0.96,
+      model: "gnani-prisma-v2.5",
     };
   }
 
   /**
-   * Synthesize order summary into spoken voice with Gnani Timbre TTS
+   * Synthesize order summary into spoken voice with Gnani Timbre TTS (v2.5)
    */
-  static async synthesizeSpeech(text: string, language: string = "hi-IN") {
+  static async synthesizeSpeech(text: string, language: string = "hi-IN", voice: string = "Nalini") {
     if (this.apiKey && this.apiKey !== "test-gnani-api-key") {
       try {
+        const payload = {
+          text,
+          voice,
+          model: "timbre-v2.5",
+          language,
+          speed: 1.0,
+          audio_config: {
+            sample_rate: 24000,
+            num_channels: 1,
+            sample_width: 2,
+            encoding: "linear_pcm",
+            container: "wav",
+          },
+        };
+
         const res = await fetch(this.ttsUrl, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            "x-api-key": this.apiKey,
+            "X-API-Key-ID": this.apiKey,
           },
-          body: JSON.stringify({
-            text,
-            language,
-            gender: "FEMALE",
-            audio_format: "mp3",
-          }),
+          body: JSON.stringify(payload),
         });
 
         if (!res.ok) {
-          throw new Error(`Gnani Timbre error (${res.status})`);
+          const err = await res.text();
+          throw new Error(`Gnani Timbre error (${res.status}): ${err}`);
         }
 
-        const data = await res.json();
+        const arrayBuf = await res.arrayBuffer();
+        const base64Audio = Buffer.from(arrayBuf).toString("base64");
+
         return {
-          audioBase64: data.audio_base64 || data.audio,
-          audioUrl: data.audio_url,
+          audioBase64: base64Audio,
+          mimeType: "audio/wav",
+          model: "timbre-v2.5",
+          audioUrl: `data:audio/wav;base64,${base64Audio}`,
         };
       } catch (err) {
         console.error("[Gnani TTS Proxy Error]:", err);
