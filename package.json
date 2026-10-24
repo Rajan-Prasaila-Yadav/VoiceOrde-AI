@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
+    "build": "cd frontend && npm install && npm run build",
+    "dev": "npm --prefix frontend run dev",
+    "start": "npm --prefix frontend run start",
     "dev:backend": "npm --prefix backend run dev",
     "dev:frontend": "npm --prefix frontend run dev",
     "build:backend": "npm --prefix backend run build",
@@ -12,9 +15,15 @@
     "prisma:push": "npm --prefix backend run prisma:push"
   },
   "devDependencies": {
+    "next": "15.2.1",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
     "prisma": "^6.19.3"
   },
   "dependencies": {
+    "next": "15.2.1",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
     "@prisma/client": "^6.19.3"
   }
 }
