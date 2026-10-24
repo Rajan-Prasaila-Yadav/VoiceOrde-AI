@@ -130,11 +130,18 @@ npm run build
 
 ---
 
-## 👥 Default Demo Credentials
+## 👥 Default Demo Credentials (Example Placeholders)
 - **Role**: Store Owner / Admin
-- **Email**: `admin@kirana.store` *(or your registered email in app_users)*
-- **Password**: `YourSecurePassword123`
-- **Google Sign-In**: Supported via Supabase OAuth
+- **Email**: `owner@example-kirana.com` *(Example placeholder — use your registered admin email)*
+- **Password**: `StoreAdmin@123` *(Example placeholder — use your admin password)*
+- **Customer Sign-In**: Login with Google via Supabase OAuth (Includes first-time profile completion gateway with phone and delivery address)
+
+---
+
+## 🏬 Kirana Store Settings & Customer Profiles
+- **Store Settings (`/admin/settings`)**: Configure Store Name, Owner Name, Contact Mobile (+91 unchanged prefix, 10 digits), WhatsApp number ("Same as Mobile" option), complete address, landmark, 6-digit pincode, Google Maps location link (click to open in Google Maps), fixed 16:9 aspect ratio storefront image, and fixed 1:1 aspect ratio Shop UPI QR code.
+- **Customer Profile Gateway (`/profile/complete`)**: Customers signing in via Google complete their full name, +91 10-digit mobile number, delivery address, pincode, landmark, and optional Google Maps pin before proceeding to grocery ordering.
+
 
 ---
 

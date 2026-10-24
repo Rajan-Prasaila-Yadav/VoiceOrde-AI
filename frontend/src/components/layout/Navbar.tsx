@@ -3,7 +3,7 @@
 import React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Mic, Package, ClipboardList, Store, Sparkles } from "lucide-react";
+import { Mic, Package, ClipboardList, Store, Sparkles, Settings } from "lucide-react";
 import { GoogleLoginButton } from "@/components/auth/GoogleLoginButton";
 
 export function Navbar() {
@@ -11,8 +11,9 @@ export function Navbar() {
 
   const navLinks = [
     { label: "Voice Order Desk", href: "/", icon: Mic },
-    { label: "Catalogue & Add Item", href: "/admin/products", icon: Package },
-    { label: "Orders & Stock Deductions", href: "/admin/orders", icon: ClipboardList },
+    { label: "Catalogue", href: "/admin/products", icon: Package },
+    { label: "Orders", href: "/admin/orders", icon: ClipboardList },
+    { label: "Settings", href: "/admin/settings", icon: Settings },
   ];
 
   return (

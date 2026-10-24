@@ -1,8 +1,9 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
+import Link from "next/link";
 import { createClient } from "@supabase/supabase-js";
-import { LogIn, LogOut, ShieldCheck, User, Lock, Mail, X } from "lucide-react";
+import { LogIn, LogOut, ShieldCheck, User, Lock, Mail, X, Settings } from "lucide-react";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
@@ -137,10 +138,28 @@ export function GoogleLoginButton() {
           </span>
         </div>
 
+        {isAdmin ? (
+          <Link
+            href="/admin/settings"
+            title="Store Settings"
+            className="p-1.5 rounded-lg text-slate-400 hover:text-emerald-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+          >
+            <Settings className="w-4 h-4" />
+          </Link>
+        ) : (
+          <Link
+            href="/profile/complete"
+            title="My Customer Profile"
+            className="p-1.5 rounded-lg text-slate-400 hover:text-emerald-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+          >
+            <User className="w-4 h-4" />
+          </Link>
+        )}
+
         <button
           onClick={handleSignOut}
           title="Sign out"
-          className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+          className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
         >
           <LogOut className="w-4 h-4" />
         </button>

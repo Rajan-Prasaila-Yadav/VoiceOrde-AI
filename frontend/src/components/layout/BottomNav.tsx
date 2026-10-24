@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Mic, Package, ClipboardList, UserCheck, Download, RefreshCw, Sparkles, Store } from "lucide-react";
+import { Mic, Package, ClipboardList, Settings, Download, RefreshCw } from "lucide-react";
 
 export function BottomNav() {
   const pathname = usePathname();
@@ -46,7 +46,7 @@ export function BottomNav() {
     { label: "Voice Desk", href: "/", icon: Mic },
     { label: "Catalogue", href: "/admin/products", icon: Package },
     { label: "Orders", href: "/admin/orders", icon: ClipboardList },
-    { label: "Admin", href: "/login", icon: UserCheck },
+    { label: "Settings", href: "/admin/settings", icon: Settings },
   ];
 
   return (

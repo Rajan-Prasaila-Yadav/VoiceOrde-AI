@@ -59,6 +59,7 @@ export function VoiceOrderDesk() {
   );
   const [placedOrder, setPlacedOrder] = useState<OrderRecord | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [shopSettings, setShopSettings] = useState<any>(null);
 
   // Manual Quick Catalogue Search state
   const [showCataloguePicker, setShowCataloguePicker] = useState(false);
@@ -77,6 +78,22 @@ export function VoiceOrderDesk() {
 
   useEffect(() => {
     loadProducts();
+
+    // Load store configuration for bills and QR code
+    fetch("/api/shop/settings")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data) setShopSettings(data);
+      })
+      .catch((e) => console.warn("Shop settings load failed", e));
+
+    // Auto-fill customer profile details if logged in
+    const cachedName = localStorage.getItem("voiceorder_customer_name");
+    const cachedPhone = localStorage.getItem("voiceorder_customer_phone");
+    const cachedAddress = localStorage.getItem("voiceorder_customer_address");
+    if (cachedName) setCustomerName(cachedName);
+    if (cachedPhone) setCustomerPhone(cachedPhone);
+    if (cachedAddress) setDeliveryAddress(cachedAddress);
   }, []);
 
   // Filter products for quick-add picker
@@ -682,13 +699,22 @@ export function VoiceOrderDesk() {
               />
             </div>
             <div>
-              <label className="block text-xs font-medium text-slate-500 mb-1">Phone Number</label>
-              <input
-                type="text"
-                value={customerPhone}
-                onChange={(e) => setCustomerPhone(e.target.value)}
-                className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
-              />
+              <label className="block text-xs font-medium text-slate-500 mb-1">Mobile Number (10 digits)</label>
+              <div className="flex items-center">
+                <span className="inline-flex items-center px-2.5 py-2 text-xs font-bold text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 border border-r-0 border-slate-300 dark:border-slate-700 rounded-l-xl select-none">
+                  🇮🇳 +91
+                </span>
+                <input
+                  type="text"
+                  maxLength={10}
+                  value={customerPhone.replace(/^\+91/, "").replace(/\D/g, "")}
+                  onChange={(e) => {
+                    const digits = e.target.value.replace(/\D/g, "").slice(0, 10);
+                    setCustomerPhone(`+91${digits}`);
+                  }}
+                  className="w-full px-3 py-2 text-xs font-semibold rounded-r-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                />
+              </div>
             </div>
             <div>
               <label className="block text-xs font-medium text-slate-500 mb-1">Payment Method</label>
@@ -739,6 +765,26 @@ export function VoiceOrderDesk() {
 
           {/* Receipt details */}
           <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 border border-slate-200 dark:border-slate-800 shadow-sm space-y-4 max-w-md mx-auto">
+            {/* Store Header on Bill */}
+            <div className="text-center pb-3 border-b border-slate-100 dark:border-slate-800 space-y-1">
+              <span className="font-black text-sm text-slate-900 dark:text-white block">
+                {shopSettings?.name || "Sharma Kirana Store"}
+              </span>
+              <span className="text-[11px] text-slate-500 block">
+                {shopSettings?.address || "Shop 12, Main Bazaar"} • Ph: {shopSettings?.phone || "+919876543210"}
+              </span>
+              {shopSettings?.googleMapsUrl && (
+                <a
+                  href={shopSettings.googleMapsUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-[10px] text-emerald-600 font-bold hover:underline"
+                >
+                  <span>View Store on Google Maps</span>
+                </a>
+              )}
+            </div>
+
             <div className="flex justify-between text-xs text-slate-500 border-b pb-2">
               <span>Customer: {placedOrder.customerName}</span>
               <span>{placedOrder.customerPhone}</span>
@@ -760,16 +806,27 @@ export function VoiceOrderDesk() {
               <span className="text-emerald-600">₹{placedOrder.totalAmount}</span>
             </div>
 
-            {/* UPI QR Display */}
+            {/* Shop UPI QR in fixed 1:1 Aspect Ratio */}
             {placedOrder.paymentMode === "UPI_QR" && (
               <div className="pt-3 border-t text-center space-y-2">
                 <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block">
-                  Scan UPI QR to Pay
+                  Scan Shop UPI QR to Pay
                 </span>
-                <div className="w-36 h-36 mx-auto bg-slate-100 dark:bg-slate-800 rounded-xl flex items-center justify-center border border-slate-300 dark:border-slate-700">
-                  <QrCode className="w-24 h-24 text-slate-800 dark:text-slate-200" />
+                <div className="w-36 h-36 mx-auto aspect-square rounded-2xl overflow-hidden bg-white p-2 shadow-sm border border-slate-200 dark:border-slate-700">
+                  <img
+                    src={
+                      shopSettings?.qrImageUrl ||
+                      `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=upi://pay?pa=${encodeURIComponent(
+                        shopSettings?.upiId || "sharmakirana@upi"
+                      )}&pn=SharmaKiranaStore&cu=INR`
+                    }
+                    alt="Shop UPI QR"
+                    className="w-full h-full object-contain"
+                  />
                 </div>
-                <span className="text-[10px] text-slate-500 block">UPI: sharma.kirana@upi</span>
+                <span className="text-[11px] font-mono text-emerald-600 block font-bold">
+                  UPI: {shopSettings?.upiId || "sharmakirana@upi"}
+                </span>
               </div>
             )}
           </div>

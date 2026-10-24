@@ -101,3 +101,33 @@ export interface OrderRecord {
     totalPrice: number;
   }>;
 }
+
+export interface ShopSettings {
+  id?: string;
+  name: string;
+  ownerName: string;
+  phone: string;
+  whatsappNumber: string;
+  email: string;
+  address: string;
+  landmark: string;
+  pincode: string;
+  googleMapsUrl: string;
+  imageUrl: string;
+  qrImageUrl: string;
+  upiId: string;
+}
+
+export interface CustomerProfile {
+  id?: string;
+  email: string;
+  fullName: string;
+  phone: string;
+  whatsappNumber: string;
+  address: string;
+  landmark?: string;
+  pincode: string;
+  googleMapsUrl?: string;
+  avatarUrl?: string;
+  isProfileCompleted: boolean;
+}
