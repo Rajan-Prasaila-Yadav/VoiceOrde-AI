@@ -31,6 +31,7 @@ import {
   Check,
   Play,
   Pause,
+  X,
 } from "lucide-react";
 import { ProductItem, OrderRecord } from "@/types";
 import { ApiClient } from "@/lib/api-client";
@@ -171,6 +172,7 @@ export function VoiceOrderDesk() {
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isGnaniVoice, setIsGnaniVoice] = useState(false);
   const [isPlayingPreview, setIsPlayingPreview] = useState(false);
+  const [auditioningVoiceKey, setAuditioningVoiceKey] = useState<string | null>(null);
   const [activeSpeakingModel, setActiveSpeakingModel] = useState<string>("timbre-v3.0");
   const [activeSpeakingVoice, setActiveSpeakingVoice] = useState<string>("Shivani");
   const [autoplayBlockedAudio, setAutoplayBlockedAudio] = useState<{
@@ -194,6 +196,23 @@ export function VoiceOrderDesk() {
   // Custom Dropdown State for Gnani Voice Model & Speaker
   const [showVoiceDropdown, setShowVoiceDropdown] = useState(false);
   const voiceDropdownRef = useRef<HTMLDivElement>(null);
+
+  // Save selected model and voice to localStorage so user choice persists across page refreshes
+  const handleSelectModel = (model: "timbre-v3.0" | "timbre-v2.5", voice: string) => {
+    setSelectedGnaniModel(model);
+    setSelectedGnaniVoice(voice);
+    if (typeof window !== "undefined") {
+      localStorage.setItem("voiceorder_selected_model", model);
+      localStorage.setItem("voiceorder_selected_voice", voice);
+    }
+  };
+
+  const handleSelectLanguage = (lang: string) => {
+    setSelectedLanguage(lang);
+    if (typeof window !== "undefined") {
+      localStorage.setItem("voiceorder_selected_language", lang);
+    }
+  };
 
   // Close voice dropdown on outside click
   useEffect(() => {
@@ -223,6 +242,26 @@ export function VoiceOrderDesk() {
 
   useEffect(() => {
     loadProducts();
+
+    // 1. Restore saved Gnani voice model, speaker, and language from localStorage
+    if (typeof window !== "undefined") {
+      const savedModel = localStorage.getItem("voiceorder_selected_model") as
+        | "timbre-v3.0"
+        | "timbre-v2.5"
+        | null;
+      const savedVoice = localStorage.getItem("voiceorder_selected_voice");
+      const savedLang = localStorage.getItem("voiceorder_selected_language");
+
+      if (savedModel === "timbre-v3.0" || savedModel === "timbre-v2.5") {
+        setSelectedGnaniModel(savedModel);
+      }
+      if (savedVoice) {
+        setSelectedGnaniVoice(savedVoice);
+      }
+      if (savedLang) {
+        setSelectedLanguage(savedLang);
+      }
+    }
 
     // Load store configuration for bills and QR code
     fetch("/api/shop/settings")
@@ -348,6 +387,7 @@ export function VoiceOrderDesk() {
     setIsSpeaking(false);
     setIsGnaniVoice(false);
     setIsPlayingPreview(false);
+    setAuditioningVoiceKey(null);
     setLoadingAudioForMsgId(null);
   };
 
@@ -358,9 +398,17 @@ export function VoiceOrderDesk() {
   ) => {
     const targetModel = modelToTest || selectedGnaniModel;
     const targetVoice = voiceToTest || selectedGnaniVoice;
+    const voiceKey = `${targetModel}-${targetVoice}`;
+
+    // If currently auditioning this exact voice, toggle it off (Stop)
+    if (auditioningVoiceKey === voiceKey && (isSpeaking || isPlayingPreview)) {
+      stopSpeaking();
+      return;
+    }
 
     stopSpeaking();
     setIsPlayingPreview(true);
+    setAuditioningVoiceKey(voiceKey);
     setError(null);
     setAutoplayBlockedAudio(null);
 
@@ -397,12 +445,14 @@ export function VoiceOrderDesk() {
           setIsSpeaking(false);
           setIsGnaniVoice(false);
           setIsPlayingPreview(false);
+          setAuditioningVoiceKey(null);
           gnaniAudioRef.current = null;
         };
         audio.onerror = () => {
           setIsSpeaking(false);
           setIsGnaniVoice(false);
           setIsPlayingPreview(false);
+          setAuditioningVoiceKey(null);
           gnaniAudioRef.current = null;
         };
 
@@ -412,6 +462,7 @@ export function VoiceOrderDesk() {
       console.warn("Voice preview error:", err);
       setError(`Voice preview error: ${err.message || "Failed to generate speech"}`);
       setIsPlayingPreview(false);
+      setAuditioningVoiceKey(null);
       setIsSpeaking(false);
       setIsGnaniVoice(false);
     }
@@ -846,7 +897,7 @@ export function VoiceOrderDesk() {
               <span className="text-xs text-slate-500 font-medium">Input Language:</span>
               <select
                 value={selectedLanguage}
-                onChange={(e) => setSelectedLanguage(e.target.value)}
+                onChange={(e) => handleSelectLanguage(e.target.value)}
                 className="px-3 py-1.5 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500 cursor-pointer font-medium shadow-xs [&>option]:bg-slate-900 [&>option]:text-white"
               >
                 <option value="hi-IN">Hindi (हिन्दी / Hinglish)</option>
@@ -867,7 +918,7 @@ export function VoiceOrderDesk() {
                 <button
                   type="button"
                   onClick={() => setShowVoiceDropdown((prev) => !prev)}
-                  className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl border border-emerald-500/40 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-bold text-xs hover:border-emerald-500 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all cursor-pointer shadow-xs ring-1 ring-emerald-500/20"
+                  className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl border border-emerald-500/50 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-bold text-xs hover:border-emerald-500 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all cursor-pointer shadow-xs ring-1 ring-emerald-500/20"
                   title="Choose Gnani AI voice model and speaker"
                 >
                   <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
@@ -885,70 +936,156 @@ export function VoiceOrderDesk() {
                 </button>
               </div>
 
-              {/* Popover Floating Menu */}
+              {/* Popover Floating Audition & Selection Studio */}
               {showVoiceDropdown && (
-                <div className="absolute left-1/2 -translate-x-1/2 sm:left-auto sm:right-0 sm:translate-x-0 mt-2 w-72 sm:w-80 rounded-2xl bg-slate-900 border border-slate-700/80 shadow-2xl p-2 z-50 animate-in fade-in zoom-in-95 duration-150 backdrop-blur-xl ring-1 ring-black/50">
-                  <div className="px-3 py-2 border-b border-slate-800 flex items-center justify-between">
-                    <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
-                      Gnani Speech Platform (Vachana)
-                    </span>
-                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-950/80 text-emerald-400 font-bold border border-emerald-500/30">
-                      Live Neural API
-                    </span>
+                <div className="absolute left-1/2 -translate-x-1/2 sm:left-auto sm:right-0 sm:translate-x-0 mt-2 w-80 sm:w-96 rounded-3xl bg-slate-900/98 border border-slate-700/80 shadow-2xl p-3 sm:p-4 z-50 animate-in fade-in zoom-in-95 duration-150 backdrop-blur-2xl ring-1 ring-black/60">
+                  {/* Studio Header */}
+                  <div className="pb-3 border-b border-slate-800 flex items-center justify-between">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-black uppercase tracking-wider text-emerald-400">
+                          Gnani Voice Studio
+                        </span>
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-950 text-emerald-300 font-bold border border-emerald-500/30">
+                          Audition & Select
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-400 mt-0.5">
+                        Listen to samples (Play/Stop), compare voices, and choose your active model.
+                      </p>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setShowVoiceDropdown(false)}
+                      className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 cursor-pointer"
+                      title="Close voice studio"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
                   </div>
 
-                  <div className="py-1 space-y-1 max-h-72 overflow-y-auto">
+                  {/* List of Models with Play/Stop and Choose buttons */}
+                  <div className="py-2 space-y-2 max-h-80 overflow-y-auto pr-1">
                     {GNANI_VOICE_MODELS.map((item) => {
                       const isSelected =
                         selectedGnaniModel === item.model && selectedGnaniVoice === item.voice;
+                      const isAuditioningThis =
+                        auditioningVoiceKey === `${item.model}-${item.voice}` &&
+                        (isSpeaking || isPlayingPreview);
+
                       return (
-                        <button
+                        <div
                           key={`${item.model}-${item.voice}`}
-                          type="button"
-                          onClick={() => {
-                            setSelectedGnaniModel(item.model);
-                            setSelectedGnaniVoice(item.voice);
-                            setShowVoiceDropdown(false);
-                            // Auto preview new voice so user immediately hears quality difference
-                            playVoicePreview(item.model, item.voice);
-                          }}
-                          className={`w-full text-left p-2.5 rounded-xl flex items-start justify-between gap-2.5 transition-all cursor-pointer ${
+                          className={`p-3 rounded-2xl border transition-all ${
                             isSelected
-                              ? "bg-emerald-950/60 border border-emerald-500/40 text-emerald-200 shadow-sm"
-                              : "hover:bg-slate-800/80 text-slate-200"
+                              ? "bg-emerald-950/40 border-emerald-500/60 ring-1 ring-emerald-500/30"
+                              : "bg-slate-800/40 border-slate-800 hover:border-slate-700"
                           }`}
                         >
-                          <div className="space-y-0.5">
-                            <div className="flex items-center gap-2">
-                              <span className="font-extrabold text-xs text-white">
-                                {item.name}
-                              </span>
-                              <span
-                                className={`text-[10px] px-1.5 py-0.5 rounded-md font-bold ${
-                                  item.model === "timbre-v3.0"
-                                    ? "bg-purple-950 text-purple-300 border border-purple-500/30"
-                                    : "bg-blue-950 text-blue-300 border border-blue-500/30"
-                                }`}
-                              >
-                                {item.badge}
-                              </span>
-                              <span className="text-[10px] text-slate-400 capitalize">
-                                ({item.gender})
-                              </span>
+                          <div className="flex items-start justify-between gap-2">
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <span className="font-extrabold text-xs text-white">
+                                  {item.name}
+                                </span>
+                                <span
+                                  className={`text-[10px] px-1.5 py-0.5 rounded-md font-bold ${
+                                    item.model === "timbre-v3.0"
+                                      ? "bg-purple-950 text-purple-300 border border-purple-500/30"
+                                      : "bg-blue-950 text-blue-300 border border-blue-500/30"
+                                  }`}
+                                >
+                                  {item.badge}
+                                </span>
+                                <span className="text-[10px] text-slate-400 capitalize">
+                                  ({item.gender})
+                                </span>
+                              </div>
+                              <p className="text-[11px] text-slate-400 leading-tight mt-1">
+                                {item.description}
+                              </p>
                             </div>
-                            <p className="text-[11px] text-slate-400 leading-tight">
-                              {item.description}
-                            </p>
+
+                            {isSelected && (
+                              <span className="shrink-0 text-[10px] font-black px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 flex items-center gap-1">
+                                <Check className="w-3 h-3 text-emerald-400" />
+                                <span>Active</span>
+                              </span>
+                            )}
                           </div>
 
-                          {isSelected && (
-                            <div className="shrink-0 pt-0.5 text-emerald-400">
-                              <Check className="w-4 h-4 stroke-[2.5]" />
-                            </div>
-                          )}
-                        </button>
+                          {/* Action Row: Listen (Play/Stop) + Choose Model */}
+                          <div className="mt-2.5 pt-2 border-t border-slate-800/80 flex items-center justify-between gap-2">
+                            {/* Audition Play / Stop Button */}
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                playVoicePreview(item.model, item.voice);
+                              }}
+                              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-bold text-xs transition-all cursor-pointer shadow-xs ${
+                                isAuditioningThis
+                                  ? "bg-rose-600 hover:bg-rose-700 text-white animate-pulse shadow-rose-600/30 ring-2 ring-rose-400/40"
+                                  : "bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700"
+                              }`}
+                              title={isAuditioningThis ? "Stop this sample" : "Listen to sample"}
+                            >
+                              {isAuditioningThis ? (
+                                <>
+                                  <VolumeX className="w-3.5 h-3.5" />
+                                  <span>Stop Voice</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Play className="w-3 h-3 fill-emerald-400 text-emerald-400" />
+                                  <span>Listen Sample</span>
+                                </>
+                              )}
+                            </button>
+
+                            {/* Choose Model Button */}
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleSelectModel(item.model, item.voice);
+                              }}
+                              disabled={isSelected}
+                              className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl font-bold text-xs transition-all cursor-pointer shadow-xs ${
+                                isSelected
+                                  ? "bg-emerald-950/80 text-emerald-300 border border-emerald-500/40 cursor-default opacity-90"
+                                  : "bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-600/30 active:scale-95"
+                              }`}
+                              title={isSelected ? "Currently active model" : "Set this as active voice model"}
+                            >
+                              {isSelected ? (
+                                <>
+                                  <Check className="w-3.5 h-3.5 text-emerald-400" />
+                                  <span>Selected</span>
+                                </>
+                              ) : (
+                                <span>Choose Model</span>
+                              )}
+                            </button>
+                          </div>
+                        </div>
                       );
                     })}
+                  </div>
+
+                  {/* Popover Footer */}
+                  <div className="pt-2 border-t border-slate-800 flex items-center justify-between text-xs text-slate-400">
+                    <span className="font-semibold text-[11px]">
+                      Current: <b className="text-white">{selectedGnaniModel}</b> ({selectedGnaniVoice})
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setShowVoiceDropdown(false)}
+                      className="px-3 py-1 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-[11px] cursor-pointer"
+                    >
+                      Done (पूर्ण)
+                    </button>
                   </div>
                 </div>
               )}
