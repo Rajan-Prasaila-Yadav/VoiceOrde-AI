@@ -4,7 +4,10 @@
 // ============================================================================
 
 export class GnaniProxy {
-  private static apiKey = process.env.GNANI_API_KEY || "";
+  private static apiKey =
+    process.env.GNANI_API_KEY && process.env.GNANI_API_KEY.startsWith("vach_")
+      ? process.env.GNANI_API_KEY
+      : "vach_1ytE2CY5X2DI0qFn3rQBO2t2ILc3nxcyuNCs3CrIOSSVRgGLhI5X8MT7peB0vPMtToo7De0ZlgUNcGcSpxq2M6c4PeNG3ZGy_ea8f9ec0a443e461fcee1d85f4bcb75d";
   private static sttUrl = process.env.GNANI_PRISMA_STT_URL || "https://api.vachana.ai/stt/v3/batch/jobs";
   private static ttsUrl = process.env.GNANI_TIMBRE_TTS_URL || "https://api.vachana.ai/api/v1/tts/inference";
   private static evonUrl = process.env.GNANI_EVON_LLM_URL || "https://api.vachana.ai/v1/chat/completions";

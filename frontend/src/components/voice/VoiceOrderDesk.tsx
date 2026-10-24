@@ -44,6 +44,8 @@ interface ChatMessage {
   speakText?: string;
   speakLang?: string;
   lastDiscussedProductId?: string;
+  model?: string;
+  voice?: string;
 }
 
 interface GnaniVoiceOption {
@@ -193,6 +195,18 @@ export function VoiceOrderDesk() {
   const chatBottomRef = useRef<HTMLDivElement>(null);
   const gnaniAudioRef = useRef<HTMLAudioElement | null>(null);
 
+  // Synchronized refs so async audio callbacks always have the freshest user choice
+  const selectedModelRef = useRef<"timbre-v3.0" | "timbre-v2.5">(selectedGnaniModel);
+  const selectedVoiceRef = useRef<string>(selectedGnaniVoice);
+
+  useEffect(() => {
+    selectedModelRef.current = selectedGnaniModel;
+  }, [selectedGnaniModel]);
+
+  useEffect(() => {
+    selectedVoiceRef.current = selectedGnaniVoice;
+  }, [selectedGnaniVoice]);
+
   // Custom Dropdown State for Gnani Voice Model & Speaker
   const [showVoiceDropdown, setShowVoiceDropdown] = useState(false);
   const voiceDropdownRef = useRef<HTMLDivElement>(null);
@@ -201,6 +215,8 @@ export function VoiceOrderDesk() {
   const handleSelectModel = (model: "timbre-v3.0" | "timbre-v2.5", voice: string) => {
     setSelectedGnaniModel(model);
     setSelectedGnaniVoice(voice);
+    selectedModelRef.current = model;
+    selectedVoiceRef.current = voice;
     if (typeof window !== "undefined") {
       localStorage.setItem("voiceorder_selected_model", model);
       localStorage.setItem("voiceorder_selected_voice", voice);
@@ -254,9 +270,11 @@ export function VoiceOrderDesk() {
 
       if (savedModel === "timbre-v3.0" || savedModel === "timbre-v2.5") {
         setSelectedGnaniModel(savedModel);
+        selectedModelRef.current = savedModel;
       }
       if (savedVoice) {
         setSelectedGnaniVoice(savedVoice);
+        selectedVoiceRef.current = savedVoice;
       }
       if (savedLang) {
         setSelectedLanguage(savedLang);
@@ -480,8 +498,8 @@ export function VoiceOrderDesk() {
     setAutoplayBlockedAudio(null);
     if (msgId) setLoadingAudioForMsgId(msgId);
 
-    const modelToUse = forceModel || selectedGnaniModel;
-    const voiceToUse = forceVoice || selectedGnaniVoice;
+    const modelToUse = forceModel || selectedModelRef.current || selectedGnaniModel;
+    const voiceToUse = forceVoice || selectedVoiceRef.current || selectedGnaniVoice;
 
     // Clean speech text so TTS never says "dot", "bracket", "bullet", or reads formatting symbols
     const cleanText = text
@@ -603,7 +621,9 @@ export function VoiceOrderDesk() {
       .map((it) => `${it.quantity} ${it.unit} ${it.productName}`)
       .join(", ");
     const summaryText = `Aapka order hai: ${itemsDescription}. Kul rashi ${grandTotal} rupaye hai. Kya main order confirm kar doon?`;
-    await speakResponse(summaryText, selectedLanguage, selectedGnaniModel, selectedGnaniVoice);
+    const currentModel = selectedModelRef.current || selectedGnaniModel;
+    const currentVoice = selectedVoiceRef.current || selectedGnaniVoice;
+    await speakResponse(summaryText, selectedLanguage, currentModel, currentVoice);
   };
 
   // Voice recording toggle with automatic AI voice stop
@@ -753,6 +773,9 @@ export function VoiceOrderDesk() {
 
       // 4. Append AI response to conversation
       if (json.reply) {
+        const currentModel = selectedModelRef.current || selectedGnaniModel;
+        const currentVoice = selectedVoiceRef.current || selectedGnaniVoice;
+
         const aiMsg: ChatMessage = {
           id: "ai-" + Date.now(),
           role: "assistant",
@@ -761,11 +784,13 @@ export function VoiceOrderDesk() {
           speakText: json.speakText || json.reply,
           speakLang: json.speakLang,
           lastDiscussedProductId: json.lastDiscussedProductId,
+          model: currentModel,
+          voice: currentVoice,
         };
 
         setMessages((prev) => [...prev, aiMsg]);
-        // Speak response aloud to customer
-        speakResponse(json.speakText || json.reply, json.speakLang);
+        // Speak response aloud to customer using active Gnani model and voice
+        speakResponse(json.speakText || json.reply, json.speakLang, currentModel, currentVoice);
       }
 
       // 5. If items were detected to be added, update cart
@@ -911,30 +936,79 @@ export function VoiceOrderDesk() {
               </select>
             </div>
 
-            {/* Custom Interactive Popover Dropdown for Gnani AI Voice Model */}
+            {/* Direct Model & Voice Selector */}
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs text-slate-500 font-medium">Gnani Voice Model:</span>
+              <select
+                id="gnani-voice-model-selector"
+                value={`${selectedGnaniModel}|${selectedGnaniVoice}`}
+                onChange={(e) => {
+                  const [m, v] = e.target.value.split("|");
+                  handleSelectModel(m as any, v);
+                }}
+                className="px-3 py-1.5 text-xs rounded-xl border border-emerald-500/60 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-bold focus:outline-none focus:ring-2 focus:ring-emerald-500 cursor-pointer shadow-xs [&>option]:bg-slate-900 [&>option]:text-white"
+              >
+                {GNANI_VOICE_MODELS.map((item) => (
+                  <option key={`${item.model}-${item.voice}`} value={`${item.model}|${item.voice}`}>
+                    {item.model} • {item.name} ({item.gender === "female" ? "Female" : "Male"} - {item.badge})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Direct Listen / Stop Voice Button */}
+            <button
+              type="button"
+              onClick={() => {
+                if (isSpeaking || isPlayingPreview) {
+                  stopSpeaking();
+                } else {
+                  playVoicePreview();
+                }
+              }}
+              className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl border font-bold text-xs transition-all cursor-pointer shadow-xs active:scale-95 ${
+                isSpeaking || isPlayingPreview
+                  ? "bg-rose-600 hover:bg-rose-700 text-white border-rose-500 animate-pulse shadow-rose-600/30 ring-2 ring-rose-400/40"
+                  : "bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-500 shadow-emerald-600/30"
+              }`}
+              title={
+                isSpeaking || isPlayingPreview
+                  ? "Stop currently playing voice"
+                  : "Listen to sample of selected Gnani model"
+              }
+            >
+              {isSpeaking || isPlayingPreview ? (
+                <>
+                  <VolumeX className="w-3.5 h-3.5" />
+                  <span>Stop Voice (रोकें)</span>
+                </>
+              ) : (
+                <>
+                  <Play className="w-3.5 h-3.5 fill-white text-white" />
+                  <span>Listen Voice (आवाज़ सुनें)</span>
+                </>
+              )}
+            </button>
+
+            {/* Voice Studio Popover Drawer for Deep Model Comparison */}
             <div className="relative inline-block" ref={voiceDropdownRef}>
-              <div className="flex items-center gap-1.5">
-                <span className="text-xs text-slate-500 font-medium">Gnani Voice Model:</span>
-                <button
-                  type="button"
-                  onClick={() => setShowVoiceDropdown((prev) => !prev)}
-                  className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl border border-emerald-500/50 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-bold text-xs hover:border-emerald-500 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all cursor-pointer shadow-xs ring-1 ring-emerald-500/20"
-                  title="Choose Gnani AI voice model and speaker"
-                >
-                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                  <span className="font-extrabold text-emerald-600 dark:text-emerald-400">
-                    {selectedGnaniModel}
-                  </span>
-                  <span className="text-slate-700 dark:text-slate-300 font-semibold">
-                    • {selectedGnaniVoice}
-                  </span>
-                  <ChevronDown
-                    className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-200 ${
-                      showVoiceDropdown ? "rotate-180" : ""
-                    }`}
-                  />
-                </button>
-              </div>
+              <button
+                type="button"
+                onClick={() => setShowVoiceDropdown((prev) => !prev)}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border font-bold text-xs transition-all cursor-pointer shadow-xs ${
+                  showVoiceDropdown
+                    ? "bg-slate-900 text-white dark:bg-white dark:text-slate-950 border-slate-700"
+                    : "border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800"
+                }`}
+                title="Compare all 6 Gnani models and voices in Studio"
+              >
+                <span>🎛️ Voice Studio</span>
+                <ChevronDown
+                  className={`w-3.5 h-3.5 transition-transform duration-200 ${
+                    showVoiceDropdown ? "rotate-180" : ""
+                  }`}
+                />
+              </button>
 
               {/* Popover Floating Audition & Selection Studio */}
               {showVoiceDropdown && (
@@ -951,7 +1025,7 @@ export function VoiceOrderDesk() {
                         </span>
                       </div>
                       <p className="text-[11px] text-slate-400 mt-0.5">
-                        Listen to samples (Play/Stop), compare voices, and choose your active model.
+                        Click any card to select it, or tap Listen to compare voices.
                       </p>
                     </div>
 
@@ -965,7 +1039,7 @@ export function VoiceOrderDesk() {
                     </button>
                   </div>
 
-                  {/* List of Models with Play/Stop and Choose buttons */}
+                  {/* List of Models with Play/Stop and Card Selection */}
                   <div className="py-2 space-y-2 max-h-80 overflow-y-auto pr-1">
                     {GNANI_VOICE_MODELS.map((item) => {
                       const isSelected =
@@ -977,10 +1051,11 @@ export function VoiceOrderDesk() {
                       return (
                         <div
                           key={`${item.model}-${item.voice}`}
-                          className={`p-3 rounded-2xl border transition-all ${
+                          onClick={() => handleSelectModel(item.model, item.voice)}
+                          className={`p-3 rounded-2xl border transition-all cursor-pointer ${
                             isSelected
-                              ? "bg-emerald-950/40 border-emerald-500/60 ring-1 ring-emerald-500/30"
-                              : "bg-slate-800/40 border-slate-800 hover:border-slate-700"
+                              ? "bg-emerald-950/60 border-emerald-500 ring-2 ring-emerald-500/40"
+                              : "bg-slate-800/40 border-slate-800 hover:border-slate-700 hover:bg-slate-800/70"
                           }`}
                         >
                           <div className="flex items-start justify-between gap-2">
@@ -1007,10 +1082,14 @@ export function VoiceOrderDesk() {
                               </p>
                             </div>
 
-                            {isSelected && (
-                              <span className="shrink-0 text-[10px] font-black px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 flex items-center gap-1">
-                                <Check className="w-3 h-3 text-emerald-400" />
+                            {isSelected ? (
+                              <span className="shrink-0 text-[10px] font-black px-2 py-0.5 rounded-full bg-emerald-500 text-slate-950 font-bold flex items-center gap-1 shadow-xs">
+                                <Check className="w-3 h-3 text-slate-950 stroke-[3]" />
                                 <span>Active</span>
+                              </span>
+                            ) : (
+                              <span className="shrink-0 text-[10px] font-semibold text-slate-500 hover:text-slate-300">
+                                Click to pick
                               </span>
                             )}
                           </div>
@@ -1051,17 +1130,16 @@ export function VoiceOrderDesk() {
                                 e.stopPropagation();
                                 handleSelectModel(item.model, item.voice);
                               }}
-                              disabled={isSelected}
                               className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl font-bold text-xs transition-all cursor-pointer shadow-xs ${
                                 isSelected
-                                  ? "bg-emerald-950/80 text-emerald-300 border border-emerald-500/40 cursor-default opacity-90"
+                                  ? "bg-emerald-500 text-slate-950 font-black cursor-default"
                                   : "bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-600/30 active:scale-95"
                               }`}
                               title={isSelected ? "Currently active model" : "Set this as active voice model"}
                             >
                               {isSelected ? (
                                 <>
-                                  <Check className="w-3.5 h-3.5 text-emerald-400" />
+                                  <Check className="w-3.5 h-3.5 stroke-[3]" />
                                   <span>Selected</span>
                                 </>
                               ) : (
@@ -1090,22 +1168,6 @@ export function VoiceOrderDesk() {
                 </div>
               )}
             </div>
-
-            {/* Direct Voice Model Preview / Test Button */}
-            <button
-              type="button"
-              onClick={() => playVoicePreview()}
-              disabled={isPlayingPreview}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border font-bold text-xs transition-all cursor-pointer shadow-xs ${
-                isPlayingPreview
-                  ? "bg-purple-600 text-white border-purple-500 animate-pulse shadow-purple-500/30 ring-2 ring-purple-400/40"
-                  : "bg-slate-900 text-white dark:bg-emerald-950/70 dark:text-emerald-200 border-slate-700 dark:border-emerald-500/40 hover:bg-slate-800 dark:hover:bg-emerald-900"
-              }`}
-              title="Test speaking quality of current Gnani model directly"
-            >
-              <Volume2 className={`w-3.5 h-3.5 ${isPlayingPreview ? "animate-bounce" : ""}`} />
-              <span>{isPlayingPreview ? "Speaking Preview..." : "Test Voice (आवाज़ सुनें)"}</span>
-            </button>
           </div>
 
           {/* Real-time Voice Audio Visualizer Banner (Shown whenever audio is actively playing) */}
@@ -1238,7 +1300,7 @@ export function VoiceOrderDesk() {
                     <div className="pt-2 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 dark:border-slate-800/60 mt-1">
                       <div className="inline-flex items-center gap-1.5 text-[10px] text-slate-400 font-semibold">
                         <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                        <span>Gnani {selectedGnaniModel} • {selectedGnaniVoice}</span>
+                        <span>Gnani {m.model || selectedGnaniModel} • {m.voice || selectedGnaniVoice}</span>
                       </div>
                       <button
                         type="button"
@@ -1246,8 +1308,8 @@ export function VoiceOrderDesk() {
                           speakResponse(
                             m.speakText || m.content,
                             m.speakLang,
-                            selectedGnaniModel,
-                            selectedGnaniVoice,
+                            selectedModelRef.current || selectedGnaniModel,
+                            selectedVoiceRef.current || selectedGnaniVoice,
                             m.id
                           )
                         }
