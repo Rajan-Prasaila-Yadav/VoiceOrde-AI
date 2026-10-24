@@ -21,39 +21,46 @@ import {
   ChevronUp,
   Trash2,
   Volume2,
+  VolumeX,
   Bot,
+  User,
   ClipboardList,
   Printer,
   Share2,
+  Tag,
 } from "lucide-react";
 import { ProductItem, OrderRecord } from "@/types";
 import { ApiClient } from "@/lib/api-client";
 
+interface ChatMessage {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  time: string;
+  speakText?: string;
+  lastDiscussedProductId?: string;
+}
+
 const SAMPLE_INTERACTIONS = [
   {
-    type: "ORDER",
-    label: "🛒 आटा + बटर + चीनी (Order)",
-    text: "दो किलो आटा, एक पैकेट अमूल बटर और एक किलो चीनी चाहिए",
-  },
-  {
-    type: "ORDER",
-    label: "🛒 तेल + नमक + दाल (Order)",
-    text: "1 litre Fortune mustard oil aur ek packet Tata salt aur ek kilo toor dal",
-  },
-  {
-    type: "QUERY",
     label: "❓ आटा का भाव क्या है?",
     text: "Bhaiya, Aashirvaad aata ka price aur availability kya hai?",
   },
   {
-    type: "QUERY",
-    label: "❓ क्या फॉर्च्यून तेल उपलब्ध है?",
-    text: "Kya Fortune mustard oil stock mein available hai?",
+    label: "➕ 1 kg add kar do",
+    text: "Haan, 1 kg add kar do cart mein",
   },
   {
-    type: "QUERY",
-    label: "❓ दुकान कब तक खुली है?",
-    text: "Sharma Kirana store ka pata aur khulne ka samay kya hai?",
+    label: "🛒 1L mustard oil aur namak",
+    text: "1 litre Fortune mustard oil aur ek packet Tata salt chahiye",
+  },
+  {
+    label: "🏷️ क्या कोई डिस्काउंट मिलेगा?",
+    text: "Bhaiya, is order par koi discount ya offer milega kya?",
+  },
+  {
+    label: "✅ बस इतना ही, आर्डर कन्फर्म करो",
+    text: "Bas itna hi chahiye, order confirm kar do",
   },
 ];
 
@@ -64,6 +71,8 @@ export function VoiceOrderDesk() {
   const [processing, setProcessing] = useState(false);
   const [products, setProducts] = useState<ProductItem[]>([]);
   const [orderItems, setOrderItems] = useState<any[]>([]);
+  const [discount, setDiscount] = useState(0);
+
   const [customerName, setCustomerName] = useState("Sunita Devi");
   const [customerPhone, setCustomerPhone] = useState("9812345678");
   const [deliveryAddress, setDeliveryAddress] = useState(
@@ -76,13 +85,20 @@ export function VoiceOrderDesk() {
   const [error, setError] = useState<string | null>(null);
   const [shopSettings, setShopSettings] = useState<any>(null);
 
-  // Conversational Kirana AI State
-  const [aiResponse, setAiResponse] = useState<{
-    reply: string;
-    speakText: string;
-    intent?: string;
-  } | null>(null);
+  // Multi-Turn Chat Conversation State
+  const [messages, setMessages] = useState<ChatMessage[]>([
+    {
+      id: "msg-0",
+      role: "assistant",
+      content:
+        "Namaste! Sharma Kirana Store mein aapka swagat hai. Main aapka Kirana AI sahayak hoon. Aapko aaj kya chahiye — Atta, Chawal, Tel, Masale ya koi aur grocery? Bolkar batayein!",
+      time: "Just now",
+      speakText:
+        "Namaste! Sharma Kirana Store mein aapka swagat hai. Aapko aaj kya chahiye? Bolkar batayein!",
+    },
+  ]);
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const [readyToConfirm, setReadyToConfirm] = useState(false);
 
   // Manual Quick Catalogue Search state
   const [showCataloguePicker, setShowCataloguePicker] = useState(false);
@@ -90,6 +106,12 @@ export function VoiceOrderDesk() {
   const [pickerCategory, setPickerCategory] = useState("all");
 
   const latestTranscriptRef = useRef("");
+  const chatBottomRef = useRef<HTMLDivElement>(null);
+
+  // Scroll chat to bottom on new messages
+  useEffect(() => {
+    chatBottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
 
   // Load products to match items
   const loadProducts = async () => {
@@ -213,8 +235,19 @@ export function VoiceOrderDesk() {
     }
   };
 
-  // Simulate audio capture or web speech
+  // Stop TTS immediately (Barge-in / Stop voice)
+  const stopSpeaking = () => {
+    if (typeof window !== "undefined" && "speechSynthesis" in window) {
+      window.speechSynthesis.cancel();
+    }
+    setIsSpeaking(false);
+  };
+
+  // Voice recording toggle with automatic AI voice stop
   const toggleRecording = () => {
+    // When user starts speaking, immediately stop any playing AI voice!
+    stopSpeaking();
+
     if (isRecording) {
       stopRecording();
     } else {
@@ -227,6 +260,7 @@ export function VoiceOrderDesk() {
     setTranscript("");
     latestTranscriptRef.current = "";
     setError(null);
+    stopSpeaking();
 
     const SpeechRecognition =
       (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -302,12 +336,27 @@ export function VoiceOrderDesk() {
     }
   };
 
-  // Conversational Engine: Asks questions or places orders using real DB & Gnani Evon LLM
+  // Conversational Multi-Turn Engine: Asks questions or places orders using real DB & Gnani Evon LLM
   const processTranscript = async (customText?: string) => {
     const textToProcess = (typeof customText === "string" ? customText : transcript).trim();
     if (!textToProcess) return;
+
+    // Stop previous voice
+    stopSpeaking();
     setProcessing(true);
     setError(null);
+
+    // 1. Append user message to conversation immediately
+    const userMsg: ChatMessage = {
+      id: "user-" + Date.now(),
+      role: "user",
+      content: textToProcess,
+      time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+    };
+
+    const nextConversation = [...messages, userMsg];
+    setMessages(nextConversation);
+    setTranscript("");
 
     try {
       const res = await fetch("/api/gnani/chat", {
@@ -316,23 +365,46 @@ export function VoiceOrderDesk() {
         body: JSON.stringify({
           message: textToProcess,
           customerPhone,
+          conversationHistory: nextConversation.map((m) => ({
+            role: m.role,
+            content: m.content,
+            lastDiscussedProductId: m.lastDiscussedProductId,
+          })),
+          currentCart: orderItems,
+          currentDiscount: discount,
         }),
       });
 
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Failed to process query");
 
+      // 2. Handle Discount if granted by store
+      if (typeof json.appliedDiscount === "number") {
+        setDiscount(json.appliedDiscount);
+      }
+
+      // 3. Handle Ready to Confirm flag
+      if (json.readyToConfirm) {
+        setReadyToConfirm(true);
+      }
+
+      // 4. Append AI response to conversation
       if (json.reply) {
-        setAiResponse({
-          reply: json.reply,
+        const aiMsg: ChatMessage = {
+          id: "ai-" + Date.now(),
+          role: "assistant",
+          content: json.reply,
+          time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
           speakText: json.speakText || json.reply,
-          intent: json.intent,
-        });
+          lastDiscussedProductId: json.lastDiscussedProductId,
+        };
+
+        setMessages((prev) => [...prev, aiMsg]);
         // Speak response aloud to customer
         speakResponse(json.speakText || json.reply);
       }
 
-      // If items were detected to be added, update cart
+      // 5. If items were detected to be added, update cart
       if (json.items && json.items.length > 0) {
         setOrderItems((prev) => {
           const merged = [...prev];
@@ -365,6 +437,7 @@ export function VoiceOrderDesk() {
     if (orderItems.length === 0) return;
     setProcessing(true);
     setError(null);
+    stopSpeaking();
 
     const hasStockError = orderItems.some((it) => it.stockError);
     if (hasStockError) {
@@ -374,15 +447,21 @@ export function VoiceOrderDesk() {
     }
 
     try {
+      const sub = orderItems.reduce((acc, it) => acc + it.totalPrice, 0);
+      const grandTotal = Math.max(0, sub - discount);
+
       const payload = {
         shopId: "00000000-0000-0000-0000-000000000001",
         customerName,
         customerPhone,
         deliveryAddress,
-        rawTranscript: transcript,
+        rawTranscript: messages.map((m) => `${m.role}: ${m.content}`).join("\n"),
         detectedLanguage: selectedLanguage,
         isVoiceOrder: true,
         paymentMode,
+        subtotal: sub,
+        discount,
+        totalAmount: grandTotal,
         items: orderItems.map((it) => ({
           productId: it.productId,
           productName: it.productName,
@@ -402,7 +481,13 @@ export function VoiceOrderDesk() {
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Order placement failed");
 
-      setPlacedOrder(json.data);
+      setPlacedOrder({
+        ...json.data,
+        subtotal: sub,
+        totalAmount: grandTotal,
+        items: orderItems,
+      });
+
       // Save customer phone for order tracking
       localStorage.setItem("voiceorder_customer_phone", customerPhone);
       localStorage.setItem("voiceorder_customer_name", customerName);
@@ -421,23 +506,24 @@ export function VoiceOrderDesk() {
   };
 
   const subtotal = orderItems.reduce((acc, it) => acc + it.totalPrice, 0);
+  const grandTotal = Math.max(0, subtotal - discount);
 
   return (
     <div className="space-y-8">
       {/* Voice Recorder & Conversational AI Desk */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 sm:p-8 shadow-xl relative overflow-hidden">
-        <div className="max-w-2xl mx-auto text-center space-y-4">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 sm:p-8 shadow-xl relative overflow-hidden space-y-6">
+        {/* Top Header */}
+        <div className="max-w-2xl mx-auto text-center space-y-3">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300 text-xs font-semibold">
             <Sparkles className="w-3.5 h-3.5" />
-            <span>Gnani AI Conversational Voice Agent • Live Database</span>
+            <span>Gnani AI Conversational Voice Desk • Real Store Dialogue</span>
           </div>
 
-          <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white">
-            Ask Questions or Speak Your Grocery Order (बोलकर पूछें या ऑर्डर दें)
+          <h2 className="text-xl sm:text-3xl font-extrabold text-slate-900 dark:text-white">
+            Natural Spoken Kirana Conversation (स्वाभाविक बोलचाल)
           </h2>
           <p className="text-xs sm:text-sm text-slate-500">
-            Ask prices, stock availability, or place orders naturally in Hindi, Hinglish or English.
-            The AI reads real store inventory and speaks back answers!
+            Ask item rates, choose pack sizes, request discounts, or confirm orders just like talking to a real neighbourhood shopkeeper.
           </p>
 
           {/* Spoken Language Selector */}
@@ -458,130 +544,183 @@ export function VoiceOrderDesk() {
               <option value="en-IN">Indian English</option>
             </select>
           </div>
+        </div>
 
-          {/* Big Interactive Mic Button */}
-          <div className="py-6 flex flex-col items-center justify-center">
+        {/* FULL MULTI-TURN CHAT CONVERSATION THREAD */}
+        <div className="bg-slate-50/80 dark:bg-slate-950/50 border border-slate-200/80 dark:border-slate-800/80 rounded-2xl p-4 sm:p-5 max-h-80 sm:max-h-96 overflow-y-auto space-y-4 shadow-inner">
+          {messages.map((m) => {
+            const isUser = m.role === "user";
+            return (
+              <div
+                key={m.id}
+                className={`flex items-start gap-2.5 sm:gap-3 ${
+                  isUser ? "flex-row-reverse" : "flex-row"
+                }`}
+              >
+                {/* Avatar Icon */}
+                <div
+                  className={`w-7 h-7 sm:w-8 sm:h-8 rounded-full flex items-center justify-center shrink-0 text-white shadow-xs ${
+                    isUser
+                      ? "bg-emerald-600"
+                      : "bg-gradient-to-tr from-teal-600 to-emerald-500"
+                  }`}
+                >
+                  {isUser ? <User className="w-4 h-4" /> : <Bot className="w-4 h-4" />}
+                </div>
+
+                {/* Message Bubble */}
+                <div
+                  className={`max-w-[85%] sm:max-w-[75%] rounded-2xl p-3 sm:p-4 text-xs sm:text-sm space-y-1.5 shadow-xs ${
+                    isUser
+                      ? "bg-emerald-600 text-white rounded-tr-none"
+                      : "bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 text-slate-800 dark:text-slate-100 rounded-tl-none"
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span
+                      className={`text-[10px] font-bold uppercase tracking-wider ${
+                        isUser ? "text-emerald-100" : "text-slate-400"
+                      }`}
+                    >
+                      {isUser ? "You (Customer)" : "Sharma Kirana AI"}
+                    </span>
+                    <span
+                      className={`text-[10px] ${
+                        isUser ? "text-emerald-200" : "text-slate-400"
+                      }`}
+                    >
+                      {m.time}
+                    </span>
+                  </div>
+
+                  <p className="leading-relaxed font-medium">{m.content}</p>
+
+                  {/* Audio Replay for Assistant Messages */}
+                  {!isUser && (
+                    <div className="pt-1 flex items-center justify-end">
+                      <button
+                        onClick={() => speakResponse(m.speakText || m.content)}
+                        className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-600 dark:text-emerald-400 hover:underline cursor-pointer"
+                        title="Listen to this message again"
+                      >
+                        <Volume2 className="w-3.5 h-3.5" />
+                        <span>Listen Again</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+          <div ref={chatBottomRef} />
+        </div>
+
+        {/* VOICE CONTROL BAR WITH BARGE-IN / STOP VOICE */}
+        <div className="py-2 flex flex-col items-center justify-center space-y-3">
+          <div className="flex items-center gap-4">
+            {/* Big Interactive Mic Button */}
             <button
               onClick={toggleRecording}
-              className={`w-24 h-24 rounded-full flex items-center justify-center transition-all cursor-pointer shadow-lg ${
+              className={`w-20 h-20 sm:w-24 sm:h-24 rounded-full flex items-center justify-center transition-all cursor-pointer shadow-lg ${
                 isRecording
                   ? "bg-rose-600 text-white animate-pulse shadow-rose-600/40 ring-8 ring-rose-400/20"
                   : "bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-600/30 hover:scale-105"
               }`}
+              title="Tap to speak your order or question"
             >
-              {isRecording ? <MicOff className="w-10 h-10" /> : <Mic className="w-10 h-10" />}
+              {isRecording ? <MicOff className="w-9 h-9" /> : <Mic className="w-9 h-9" />}
             </button>
-            <span className="text-xs font-semibold text-slate-600 dark:text-slate-300 mt-3">
-              {isRecording
-                ? "Listening... Ask a question or speak your order"
-                : "Tap to Speak (बोलिए - भाव पूछें या ऑर्डर दें)"}
-            </span>
+
+            {/* Prominent Stop AI Voice Button (Barge-in control) */}
+            {isSpeaking && (
+              <button
+                onClick={stopSpeaking}
+                className="flex items-center gap-1.5 px-4 py-2.5 rounded-2xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold animate-pulse shadow-lg shadow-rose-600/30 cursor-pointer transition-all"
+                title="Stop AI voice speaking"
+              >
+                <VolumeX className="w-4 h-4" />
+                <span>Stop Voice (चुप रहें)</span>
+              </button>
+            )}
           </div>
 
-          {/* Conversational AI Response Speech Bubble */}
-          {aiResponse && (
-            <div className="text-left p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-950/60 dark:to-teal-950/40 border border-emerald-200 dark:border-emerald-800 space-y-2.5 shadow-sm animate-in fade-in duration-300">
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex items-start gap-2.5">
-                  <div className="w-8 h-8 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-sm mt-0.5">
-                    <Bot className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <span className="text-[11px] font-bold text-emerald-800 dark:text-emerald-300 uppercase tracking-wider block">
-                      Sharma Kirana AI Response (लाइव जवाब)
-                    </span>
-                    <p className="text-xs sm:text-sm font-semibold text-slate-900 dark:text-slate-100 mt-0.5 leading-relaxed">
-                      {aiResponse.reply}
-                    </p>
-                  </div>
-                </div>
+          <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">
+            {isRecording
+              ? "Listening... Speak your order or question"
+              : isSpeaking
+              ? "AI is speaking... Tap mic or Stop button to interrupt"
+              : "Tap Mic to Speak (बोलिए - भाव पूछें, साइज बताएं, या आर्डर दें)"}
+          </span>
+        </div>
 
-                <button
-                  onClick={() => speakResponse(aiResponse.speakText || aiResponse.reply)}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold shrink-0 transition-colors cursor-pointer shadow-xs ${
-                    isSpeaking
-                      ? "bg-emerald-600 text-white border-emerald-600 animate-pulse"
-                      : "bg-white dark:bg-slate-800 border-emerald-300 dark:border-emerald-700 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-50"
-                  }`}
-                  title="Hear AI speak answer aloud"
-                >
-                  <Volume2 className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">{isSpeaking ? "Speaking..." : "Listen Voice"}</span>
-                </button>
-              </div>
-            </div>
-          )}
+        {/* Quick Conversational Prompt Chips */}
+        <div className="pt-1">
+          <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block text-center mb-2">
+            Try natural conversational prompts:
+          </span>
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            {SAMPLE_INTERACTIONS.map((sample, idx) => (
+              <button
+                key={idx}
+                onClick={() => processTranscript(sample.text)}
+                className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-[11px] font-semibold text-slate-700 dark:text-slate-300 hover:border-emerald-500 hover:text-emerald-600 transition-colors cursor-pointer"
+                title="Click to send as spoken message"
+              >
+                {sample.label}
+              </button>
+            ))}
+          </div>
+        </div>
 
-          {/* Sample Questions & Orders Chips */}
-          <div className="pt-2">
-            <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block mb-2">
-              Try Quick Questions or Spoken Orders:
-            </span>
-            <div className="flex flex-wrap items-center justify-center gap-2">
-              {SAMPLE_INTERACTIONS.map((sample, idx) => (
-                <button
-                  key={idx}
-                  onClick={() => {
-                    setTranscript(sample.text);
-                    processTranscript(sample.text);
-                  }}
-                  className={`px-3 py-1.5 rounded-xl border text-[11px] font-semibold transition-all cursor-pointer ${
-                    sample.type === "QUERY"
-                      ? "border-blue-200 dark:border-blue-800/60 bg-blue-50/70 dark:bg-blue-950/30 text-blue-800 dark:text-blue-300 hover:border-blue-500"
-                      : "border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:border-emerald-500 hover:text-emerald-600"
-                  }`}
-                  title="Click to ask AI or populate order"
-                >
-                  {sample.label}
-                </button>
-              ))}
-            </div>
+        {/* Fallback Text Input Box */}
+        <div className="space-y-3 pt-2">
+          <div className="relative">
+            <textarea
+              rows={2}
+              placeholder="Or type here: e.g. Aashirvaad aata ka price kya hai? or 1 kg add kar do..."
+              value={transcript}
+              onChange={(e) => setTranscript(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  processTranscript();
+                }
+              }}
+              className="w-full p-4 rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+            />
           </div>
 
-          {/* Live Transcript / Typed Input Box */}
-          <div className="space-y-3 pt-2">
-            <div className="relative">
-              <textarea
-                rows={2}
-                placeholder="Or type anything: e.g. आटा का भाव क्या है? or दो किलो आटा और एक पैकेट बटर चाहिए..."
-                value={transcript}
-                onChange={(e) => setTranscript(e.target.value)}
-                className="w-full p-4 rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-              />
-            </div>
+          <div className="flex items-center justify-center gap-3">
+            <button
+              onClick={() => processTranscript()}
+              disabled={!transcript.trim() || processing}
+              className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs sm:text-sm font-semibold shadow-md shadow-emerald-600/20 disabled:opacity-50 transition-all cursor-pointer"
+            >
+              {processing ? (
+                <>
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                  <span>Kirana AI replying...</span>
+                </>
+              ) : (
+                <>
+                  <Sparkles className="w-4 h-4" />
+                  <span>Send to Kirana AI</span>
+                </>
+              )}
+            </button>
 
-            <div className="flex items-center justify-center gap-3">
-              <button
-                onClick={() => processTranscript()}
-                disabled={!transcript.trim() || processing}
-                className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs sm:text-sm font-semibold shadow-md shadow-emerald-600/20 disabled:opacity-50 transition-all cursor-pointer"
-              >
-                {processing ? (
-                  <>
-                    <RefreshCw className="w-4 h-4 animate-spin" />
-                    <span>Processing with Gnani AI...</span>
-                  </>
-                ) : (
-                  <>
-                    <Sparkles className="w-4 h-4" />
-                    <span>Ask / Order with Kirana AI</span>
-                  </>
-                )}
-              </button>
-
-              <button
-                onClick={() => setShowCataloguePicker(!showCataloguePicker)}
-                className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs sm:text-sm font-semibold text-slate-700 dark:text-slate-300 transition-colors cursor-pointer"
-              >
-                <Package className="w-4 h-4 text-emerald-600" />
-                <span>{showCataloguePicker ? "Hide Catalogue" : "Browse & Add Items"}</span>
-                {showCataloguePicker ? (
-                  <ChevronUp className="w-3.5 h-3.5" />
-                ) : (
-                  <ChevronDown className="w-3.5 h-3.5" />
-                )}
-              </button>
-            </div>
+            <button
+              onClick={() => setShowCataloguePicker(!showCataloguePicker)}
+              className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs sm:text-sm font-semibold text-slate-700 dark:text-slate-300 transition-colors cursor-pointer"
+            >
+              <Package className="w-4 h-4 text-emerald-600" />
+              <span>{showCataloguePicker ? "Hide Catalogue" : "Browse & Add Items"}</span>
+              {showCataloguePicker ? (
+                <ChevronUp className="w-3.5 h-3.5" />
+              ) : (
+                <ChevronDown className="w-3.5 h-3.5" />
+              )}
+            </button>
           </div>
         </div>
 
@@ -649,16 +788,22 @@ export function VoiceOrderDesk() {
         </div>
       )}
 
-      {/* Review & Confirmation Step */}
+      {/* Live Order Cart & Bill Review */}
       {orderItems.length > 0 && !placedOrder && (
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 shadow-xl space-y-6">
+        <div
+          className={`bg-white dark:bg-slate-900 border rounded-3xl p-6 shadow-xl space-y-6 transition-all ${
+            readyToConfirm
+              ? "border-emerald-500 ring-4 ring-emerald-500/20"
+              : "border-slate-200 dark:border-slate-800"
+          }`}
+        >
           <div className="flex items-center justify-between pb-4 border-b border-slate-100 dark:border-slate-800">
             <div>
               <h3 className="text-lg font-bold text-slate-900 dark:text-white">
-                Review Matched Items & Live Bill
+                Live Order Cart & Verified Bill (चेक करें)
               </h3>
               <p className="text-xs text-slate-500">
-                Verified against store catalogue with automatic stock check
+                Live catalogue verification with automatic stock reservation
               </p>
             </div>
             <span className="text-xs font-semibold px-3 py-1 bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 rounded-full">
@@ -733,13 +878,13 @@ export function VoiceOrderDesk() {
                 <tr>
                   <th className="p-3 font-semibold text-slate-600 dark:text-slate-400">Product</th>
                   <th className="p-3 text-center font-semibold text-slate-600 dark:text-slate-400">
-                    Quantity
+                    Quantity & Size
                   </th>
                   <th className="p-3 text-right font-semibold text-slate-600 dark:text-slate-400">
-                    Unit Price
+                    Rate
                   </th>
                   <th className="p-3 text-right font-semibold text-slate-600 dark:text-slate-400">
-                    Total
+                    Amount
                   </th>
                   <th className="p-3 text-center font-semibold text-slate-600 dark:text-slate-400">
                     Stock
@@ -770,7 +915,7 @@ export function VoiceOrderDesk() {
                           onClick={() => handleUpdateItemQty(item.productId, 1)}
                           className="w-5 h-5 flex items-center justify-center text-slate-500 hover:text-slate-900 cursor-pointer"
                         >
-                          <Plus className="w-3 h-3" />
+                          <Plus className="w-3.5 h-3.5" />
                         </button>
                       </div>
                     </td>
@@ -848,16 +993,31 @@ export function VoiceOrderDesk() {
             </div>
           </div>
 
-          <div className="flex items-center justify-between pt-4 border-t border-slate-100 dark:border-slate-800">
-            <div>
-              <span className="text-xs text-slate-500 block">Total Order Bill</span>
-              <span className="text-2xl font-black text-slate-900 dark:text-white">₹{subtotal}</span>
+          {/* Subtotal, Discount, & Grand Total Calculation */}
+          <div className="pt-4 border-t border-slate-100 dark:border-slate-800 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
+            <div className="space-y-1">
+              <div className="flex items-center gap-4 text-xs text-slate-500">
+                <span>Subtotal: ₹{subtotal}</span>
+                {discount > 0 && (
+                  <span className="text-emerald-600 font-bold flex items-center gap-1">
+                    <Tag className="w-3.5 h-3.5" />
+                    Discount Applied: -₹{discount}
+                  </span>
+                )}
+              </div>
+              <div className="text-2xl font-black text-slate-900 dark:text-white">
+                Grand Total: <span className="text-emerald-600">₹{grandTotal}</span>
+              </div>
             </div>
 
             <button
               onClick={handleConfirmOrder}
               disabled={processing}
-              className="flex items-center gap-2 px-8 py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm shadow-lg shadow-emerald-600/30 cursor-pointer disabled:opacity-50"
+              className={`flex items-center justify-center gap-2 px-8 py-3.5 rounded-2xl text-white font-bold text-sm shadow-xl transition-all cursor-pointer disabled:opacity-50 ${
+                readyToConfirm
+                  ? "bg-emerald-600 hover:bg-emerald-700 shadow-emerald-600/40 ring-4 ring-emerald-500/30 scale-105"
+                  : "bg-slate-900 hover:bg-slate-800 dark:bg-white dark:text-slate-950 shadow-slate-900/20"
+              }`}
             >
               <span>Confirm Order & Deduct Stock</span>
               <ArrowRight className="w-4 h-4" />
@@ -874,10 +1034,10 @@ export function VoiceOrderDesk() {
               <CheckCircle className="w-7 h-7" />
             </div>
             <h3 className="text-xl font-bold text-emerald-900 dark:text-emerald-100">
-              Order #{placedOrder.orderNumber} Placed Successfully!
+              Order #{placedOrder.orderNumber} Confirmed Successfully!
             </h3>
             <p className="text-xs text-emerald-700 dark:text-emerald-300">
-              Catalogue stock has been automatically decremented in real-time.
+              Items reserved and inventory deducted in real-time.
             </p>
           </div>
 
@@ -918,6 +1078,13 @@ export function VoiceOrderDesk() {
                 </div>
               ))}
             </div>
+
+            {discount > 0 && (
+              <div className="flex justify-between text-xs text-emerald-600 font-bold border-t pt-2">
+                <span>Special Discount Applied</span>
+                <span>-₹{discount}</span>
+              </div>
+            )}
 
             <div className="border-t pt-3 flex justify-between font-extrabold text-base">
               <span>Grand Total</span>
@@ -963,8 +1130,18 @@ export function VoiceOrderDesk() {
               onClick={() => {
                 setPlacedOrder(null);
                 setOrderItems([]);
-                setTranscript("");
-                setAiResponse(null);
+                setDiscount(0);
+                setReadyToConfirm(false);
+                setMessages([
+                  {
+                    id: "msg-welcome-new",
+                    role: "assistant",
+                    content:
+                      "Namaste! Naya order lene ke liye taiyaar hoon. Aapko kya chahiye? Bolkar batayein!",
+                    time: "Just now",
+                    speakText: "Namaste! Naya order lene ke liye taiyaar hoon. Bolkar batayein!",
+                  },
+                ]);
               }}
               className="px-6 py-2.5 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 text-xs font-bold hover:opacity-90 cursor-pointer"
             >
