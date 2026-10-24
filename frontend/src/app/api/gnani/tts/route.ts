@@ -9,10 +9,17 @@ const GNANI_TIMBRE_URL =
 
 export async function POST(req: Request) {
   try {
-    const { text, language = "hi-IN", voice = "Nalini" } = await req.json();
+    const { text, language = "hi-IN", voice, model } = await req.json();
 
     if (!text || typeof text !== "string") {
       return NextResponse.json({ success: false, error: "Text is required" }, { status: 400 });
+    }
+
+    // Determine target Gnani voice model and speaker
+    const selectedModel = model === "timbre-v2.5" ? "timbre-v2.5" : "timbre-v3.0";
+    let selectedVoice = voice;
+    if (!selectedVoice) {
+      selectedVoice = selectedModel === "timbre-v3.0" ? "Shivani" : "Nalini";
     }
 
     // Clean text for speech synthesis
@@ -37,8 +44,8 @@ export async function POST(req: Request) {
       try {
         const payload = {
           text: cleanText,
-          voice: voice || "Nalini",
-          model: "timbre-v2.5",
+          voice: selectedVoice,
+          model: selectedModel,
           language: language || "hi-IN",
           speed: 1.0,
           audio_config: {

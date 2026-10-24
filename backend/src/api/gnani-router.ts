@@ -26,12 +26,12 @@ gnaniRouter.post("/stt", async (req: Request, res: Response) => {
 // POST /api/gnani/tts
 gnaniRouter.post("/tts", async (req: Request, res: Response) => {
   try {
-    const { text, language = "hi-IN" } = req.body;
+    const { text, language = "hi-IN", voice, model } = req.body;
     if (!text) {
       return res.status(400).json({ success: false, error: "Missing text to synthesize" });
     }
 
-    const result = await GnaniProxy.synthesizeSpeech(text, language);
+    const result = await GnaniProxy.synthesizeSpeech(text, language, voice, model);
     res.json({ success: true, ...result });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });

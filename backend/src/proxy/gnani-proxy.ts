@@ -53,15 +53,23 @@ export class GnaniProxy {
   }
 
   /**
-   * Synthesize order summary into spoken voice with Gnani Timbre TTS (v2.5)
+   * Synthesize order summary into spoken voice with Gnani Timbre TTS (v3.0 or v2.5)
    */
-  static async synthesizeSpeech(text: string, language: string = "hi-IN", voice: string = "Nalini") {
+  static async synthesizeSpeech(
+    text: string,
+    language: string = "hi-IN",
+    voice?: string,
+    model?: string
+  ) {
     if (this.apiKey && this.apiKey !== "test-gnani-api-key") {
       try {
+        const selectedModel = model === "timbre-v2.5" ? "timbre-v2.5" : "timbre-v3.0";
+        const selectedVoice = voice || (selectedModel === "timbre-v3.0" ? "Shivani" : "Nalini");
+
         const payload = {
           text,
-          voice,
-          model: "timbre-v2.5",
+          voice: selectedVoice,
+          model: selectedModel,
           language,
           speed: 1.0,
           audio_config: {

@@ -72,6 +72,8 @@ const SAMPLE_INTERACTIONS = [
 export function VoiceOrderDesk() {
   const [isRecording, setIsRecording] = useState(false);
   const [selectedLanguage, setSelectedLanguage] = useState("hi-IN");
+  const [selectedGnaniModel, setSelectedGnaniModel] = useState<"timbre-v3.0" | "timbre-v2.5">("timbre-v3.0");
+  const [selectedGnaniVoice, setSelectedGnaniVoice] = useState("Shivani");
   const [transcript, setTranscript] = useState("");
   const [processing, setProcessing] = useState(false);
   const [products, setProducts] = useState<ProductItem[]>([]);
@@ -271,7 +273,8 @@ export function VoiceOrderDesk() {
         body: JSON.stringify({
           text: cleanText,
           language: speakLang || selectedLanguage || "hi-IN",
-          voice: "Nalini",
+          voice: selectedGnaniVoice,
+          model: selectedGnaniModel,
         }),
       });
 
@@ -637,23 +640,47 @@ export function VoiceOrderDesk() {
             Ask item rates, choose pack sizes, request discounts, or confirm orders just like talking to a real neighbourhood shopkeeper.
           </p>
 
-          {/* Spoken Language Selector */}
-          <div className="flex items-center justify-center gap-2">
-            <span className="text-xs text-slate-500 font-medium">Spoken Language:</span>
-            <select
-              value={selectedLanguage}
-              onChange={(e) => setSelectedLanguage(e.target.value)}
-              className="px-3 py-1 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-500 cursor-pointer"
-            >
-              <option value="hi-IN">Hindi (हिन्दी / Hinglish)</option>
-              <option value="mr-IN">Marathi (मराठी)</option>
-              <option value="ta-IN">Tamil (தமிழ்)</option>
-              <option value="te-IN">Telugu (తెలుగు)</option>
-              <option value="kn-IN">Kannada (ಕನ್ನಡ)</option>
-              <option value="gu-IN">Gujarati (ગુજરાતી)</option>
-              <option value="bn-IN">Bengali (বাংলা)</option>
-              <option value="en-IN">Indian English</option>
-            </select>
+          {/* Dual Voice Controls: Spoken Language & Gnani AI Voice Model */}
+          <div className="flex flex-wrap items-center justify-center gap-3 pt-1">
+            {/* Spoken Language Selector */}
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs text-slate-500 font-medium">Input Language:</span>
+              <select
+                value={selectedLanguage}
+                onChange={(e) => setSelectedLanguage(e.target.value)}
+                className="px-3 py-1.5 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-500 cursor-pointer font-medium"
+              >
+                <option value="hi-IN">Hindi (हिन्दी / Hinglish)</option>
+                <option value="en-IN">Indian English</option>
+                <option value="mr-IN">Marathi (मराठी)</option>
+                <option value="ta-IN">Tamil (தமிழ்)</option>
+                <option value="te-IN">Telugu (తెలుగు)</option>
+                <option value="kn-IN">Kannada (ಕನ್ನಡ)</option>
+                <option value="gu-IN">Gujarati (ગુજરાતી)</option>
+                <option value="bn-IN">Bengali (বাংলা)</option>
+              </select>
+            </div>
+
+            {/* Gnani AI Voice Model & Speaker Selector */}
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs text-slate-500 font-medium">Gnani Voice Model:</span>
+              <select
+                value={`${selectedGnaniModel}:${selectedGnaniVoice}`}
+                onChange={(e) => {
+                  const [m, v] = e.target.value.split(":");
+                  setSelectedGnaniModel(m as any);
+                  setSelectedGnaniVoice(v);
+                }}
+                className="px-3 py-1.5 text-xs rounded-xl border border-emerald-500/40 bg-emerald-50/70 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300 font-semibold focus:outline-none focus:ring-2 focus:ring-emerald-500 cursor-pointer shadow-xs"
+              >
+                <option value="timbre-v3.0:Shivani">Timbre v3.0 • Shivani (Female - Modern Indic)</option>
+                <option value="timbre-v3.0:Devansh">Timbre v3.0 • Devansh (Male - Modern Indic)</option>
+                <option value="timbre-v3.0:Lakshmi">Timbre v3.0 • Lakshmi (Female - Indic)</option>
+                <option value="timbre-v2.5:Nalini">Timbre v2.5 • Nalini (Female - Standard)</option>
+                <option value="timbre-v2.5:Deepak">Timbre v2.5 • Deepak (Male - Standard)</option>
+                <option value="timbre-v2.5:Radhika">Timbre v2.5 • Radhika (Female)</option>
+              </select>
+            </div>
           </div>
         </div>
 
@@ -764,7 +791,7 @@ export function VoiceOrderDesk() {
               ? "Listening... Speak your order or question"
               : isSpeaking
               ? isGnaniVoice
-                ? "🔊 Gnani AI Timbre v2.5 (Nalini) speaking... Tap mic or Stop to interrupt"
+                ? `🔊 Gnani AI ${selectedGnaniModel} (${selectedGnaniVoice}) speaking... Tap mic or Stop to interrupt`
                 : "AI is speaking... Tap mic or Stop to interrupt"
               : "Tap Mic to Speak (बोलिए - भाव पूछें, साइज बताएं, या आर्डर दें)"}
           </span>
