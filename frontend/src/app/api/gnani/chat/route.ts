@@ -340,15 +340,16 @@ export async function POST(req: Request) {
     // Check if query is asking about price/stock AND we found a specific product match
     // =========================================================================
     const isAskingPriceOrStock =
-      /(price|rate|bhav|भाव|kitne ka|kitna hai|kitna|rate kya|available hai kya|mil jayega|stock mein hai|hai kya|kya price|availability|उपलब्ध)/i.test(
+      /(price|rate|bhav|भाव|kitne ka|kitna hai|kitna rate|rate kya|available hai kya|mil jayega|stock mein hai|hai kya|kya price|availability|उपलब्ध|कितने का|भाव क्या)/i.test(
         queryLower
       );
 
-    if (topProduct && (isAskingPriceOrStock || rankedProducts[0].score >= 25)) {
-      // Check if user is asking to ADD it directly vs asking about price
-      const hasDirectAddWord = /(add|chahiye|चाहिए|dedo|de do|दे दो|pack karo|daal do|le lo|bhej do)/i.test(queryLower);
+    const hasQuantityOrAddIntent =
+      /(add|chahiye|चाहिए|dedo|de do|दे दो|pack|daal do|le lo|bhej do|dena|देना|पैकेट|packet|kilo|किलो|litre|लीटर|gm|ग्राम)/i.test(
+        queryLower
+      ) || /(?:^|\s)\d+(\.\d+)?/i.test(queryLower) || /(ढाई|डेढ़|आधा|पाव|एक|दो|तीन|चार|पांच|दस)/i.test(queryLower);
 
-      if (!hasDirectAddWord) {
+    if (topProduct && (isAskingPriceOrStock || !hasQuantityOrAddIntent)) {
         const prodName = `${topProduct.brand ? topProduct.brand + " " : ""}${topProduct.name}`;
         const inStock = topProduct.available_stock > 0;
 
@@ -373,7 +374,6 @@ export async function POST(req: Request) {
           lastDiscussedProductName: prodName,
         });
       }
-    }
 
     // =========================================================================
     // 5. INTENT: DIRECT ORDER ADD (Single or Multi-item)
