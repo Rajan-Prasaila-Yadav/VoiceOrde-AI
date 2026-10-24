@@ -15,13 +15,13 @@
     "prisma:push": "npm --prefix backend run prisma:push"
   },
   "devDependencies": {
-    "next": "15.2.1",
+    "next": "^15.2.3",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "prisma": "^6.19.3"
   },
   "dependencies": {
-    "next": "15.2.1",
+    "next": "^15.2.3",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "@prisma/client": "^6.19.3",
