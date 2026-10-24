@@ -1,23 +1,40 @@
 import { NextResponse } from "next/server";
 
-const GNANI_API_KEY = process.env.GNANI_API_KEY || "gnani-mock-key";
-const GNANI_EXTRACT_URL =
-  process.env.GNANI_EXTRACT_URL || "https://api.gnani.ai/v1/extract";
+const GNANI_API_KEY = process.env.GNANI_API_KEY || "";
+const GNANI_EVON_URL =
+  process.env.GNANI_EVON_LLM_URL || "https://api.gnani.ai/v1/chat/completions";
 
-const HINDI_NUMBER_MAP: Record<string, number> = {
-  "ek": 1, "एक": 1, "वन": 1, "one": 1,
-  "do": 2, "दो": 2, "टू": 2, "two": 2,
-  "teen": 3, "तीन": 3, "three": 3,
-  "chaar": 4, "char": 4, "चार": 4, "four": 4,
-  "paanch": 5, "panch": 5, "पाँच": 5, "पांच": 5, "five": 5,
-  "che": 6, "chheh": 6, "छह": 6, "six": 6,
-  "saat": 7, "सात": 7, "seven": 7,
-  "aath": 8, "आठ": 8, "eight": 8,
-  "nau": 9, "नौ": 9, "nine": 9,
-  "dus": 10, "das": 10, "दस": 10, "ten": 10,
-  "aadha": 0.5, "adha": 0.5, "आधा": 0.5, "half": 0.5,
-  "paav": 0.25, "pav": 0.25, "पाव": 0.25,
-};
+const HINDI_NUMBER_PATTERNS = [
+  { regex: /(^|\s|[^a-zA-Z0-9\u0900-\u097F])(दस|dus|das|ten|10)($|\s|[^a-zA-Z0-9\u0900-\u097F])/i, val: 10 },
+  { regex: /(^|\s|[^a-zA-Z0-9\u0900-\u097F])(नौ|nau|nine|9)($|\s|[^a-zA-Z0-9\u0900-\u097F])/i, val: 9 },
+  { regex: /(^|\s|[^a-zA-Z0-9\u0900-\u097F])(आठ|aath|eight|8)($|\s|[^a-zA-Z0-9\u0900-\u097F])/i, val: 8 },
+  { regex: /(^|\s|[^a-zA-Z0-9\u0900-\u097F])(सात|saat|seven|7)($|\s|[^a-zA-Z0-9\u0900-\u097F])/i, val: 7 },
+  { regex: /(^|\s|[^a-zA-Z0-9\u0900-\u097F])(छह|छः|che|chheh|six|6)($|\s|[^a-zA-Z0-9\u0900-\u097F])/i, val: 6 },
+  { regex: /(^|\s|[^a-zA-Z0-9\u0900-\u097F])(पाँच|पांच|paanch|panch|five|5)($|\s|[^a-zA-Z0-9\u0900-\u097F])/i, val: 5 },
+  { regex: /(^|\s|[^a-zA-Z0-9\u0900-\u097F])(चार|chaar|char|four|4)($|\s|[^a-zA-Z0-9\u0900-\u097F])/i, val: 4 },
+  { regex: /(^|\s|[^a-zA-Z0-9\u0900-\u097F])(तीन|teen|three|3)($|\s|[^a-zA-Z0-9\u0900-\u097F])/i, val: 3 },
+  { regex: /(^|\s|[^a-zA-Z0-9\u0900-\u097F])(दो|do|टू|two|2)($|\s|[^a-zA-Z0-9\u0900-\u097F])/i, val: 2 },
+  { regex: /(^|\s|[^a-zA-Z0-9\u0900-\u097F])(एक|ek|वन|one|1)($|\s|[^a-zA-Z0-9\u0900-\u097F])/i, val: 1 },
+  { regex: /(^|\s|[^a-zA-Z0-9\u0900-\u097F])(आधा|aadha|adha|half|0\.5)($|\s|[^a-zA-Z0-9\u0900-\u097F])/i, val: 0.5 },
+  { regex: /(^|\s|[^a-zA-Z0-9\u0900-\u097F])(पाव|paav|pav|0\.25)($|\s|[^a-zA-Z0-9\u0900-\u097F])/i, val: 0.25 },
+];
+
+const KNOWN_GROCERY_KEYWORDS: Array<{ keys: string[]; label: string; defaultUnit: string }> = [
+  { keys: ["आशीर्वाद आटा", "aashirvaad", "आटा", "atta", "aata", "gehu"], label: "Atta", defaultUnit: "kg" },
+  { keys: ["अमूल बटर", "amul butter", "बटर", "butter", "makhan"], label: "Amul Butter", defaultUnit: "packet" },
+  { keys: ["चीनी", "cheeni", "chini", "sugar"], label: "Sugar", defaultUnit: "kg" },
+  { keys: ["fortune", "फॉर्च्यून", "mustard oil", "सरसों का तेल", "सरसों तेल", "sarson", "तेल", "oil"], label: "Mustard Oil", defaultUnit: "litre" },
+  { keys: ["tata salt", "टाटा नमक", "नमक", "namak", "salt"], label: "Tata Salt", defaultUnit: "packet" },
+  { keys: ["toor dal", "tuvar dal", "arhar", "अरहर दाल", "तूर दाल", "तूवर दाल", "दाल", "dal"], label: "Toor Dal", defaultUnit: "kg" },
+  { keys: ["red label", "रेड लेबल", "chai patti", "chai", "tea", "चाय पत्ती", "चाय"], label: "Red Label Tea", defaultUnit: "packet" },
+  { keys: ["parle g", "parle-g", "पारले जी", "पारले", "biscuit", "बिस्कुट"], label: "Parle G Biscuits", defaultUnit: "packet" },
+  { keys: ["amul taaza", "amul milk", "amul doodh", "taaza", "दूध", "doodh", "milk"], label: "Amul Taaza Milk", defaultUnit: "litre" },
+  { keys: ["amul pure ghee", "amul ghee", "desi ghee", "घी", "ghee"], label: "Amul Pure Ghee", defaultUnit: "litre" },
+  { keys: ["everest garam masala", "garam masala", "pav bhaji masala", "everest", "मसाला", "masala"], label: "Everest Garam Masala", defaultUnit: "packet" },
+  { keys: ["india gate", "basmati", "बासमती", "चावल", "chawal", "rice"], label: "Basmati Rice", defaultUnit: "kg" },
+  { keys: ["paneer", "पनीर"], label: "Paneer", defaultUnit: "packet" },
+  { keys: ["surf excel", "detergent", "soap", "साबुन"], label: "Detergent", defaultUnit: "packet" },
+];
 
 export async function POST(req: Request) {
   try {
@@ -27,133 +44,149 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: false, error: "Transcript is required" }, { status: 400 });
     }
 
-    // 1. Try Gnani Evon LLM API if key is configured
-    if (process.env.GNANI_API_KEY && process.env.GNANI_API_KEY !== "gnani-mock-key") {
+    const cleanInput = transcript.trim();
+
+    // 1. If Gnani API Key is present, try remote Evon LLM
+    if (GNANI_API_KEY && GNANI_API_KEY !== "gnani-mock-key" && !GNANI_API_KEY.includes("your-")) {
       try {
-        const response = await fetch(GNANI_EXTRACT_URL, {
+        const prompt = `You are an Indian kirana grocery order assistant. Parse this spoken order: "${cleanInput}".
+Return ONLY a valid JSON array of objects with keys: "spokenItem" (string), "quantity" (number), "unit" ("kg"|"litre"|"packet"|"g"|"piece").
+No markdown backticks, only JSON array.`;
+
+        const response = await fetch(GNANI_EVON_URL, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
+            "x-api-key": GNANI_API_KEY,
             Authorization: `Bearer ${GNANI_API_KEY}`,
           },
           body: JSON.stringify({
-            prompt: `Extract grocery items, numeric quantities, and units from this spoken Kirana order transcript: "${transcript}". Return JSON array with fields: spokenItem, quantity (number), unit.`,
+            model: "evon-v3.3",
+            messages: [{ role: "user", content: prompt }],
+            temperature: 0.1,
           }),
         });
 
         if (response.ok) {
-          const gnaniJson = await response.json();
-          if (gnaniJson.items) {
-            return NextResponse.json({ success: true, items: gnaniJson.items });
+          const resData = await response.json();
+          const content =
+            resData.choices?.[0]?.message?.content ||
+            resData.content ||
+            "";
+          const match = content.match(/\[[\s\S]*\]/);
+          if (match) {
+            const parsed = JSON.parse(match[0]);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              return NextResponse.json({ success: true, items: parsed });
+            }
           }
         }
-      } catch (err) {
-        console.warn("Gnani remote API failed, falling back to intelligent rule extractor");
+      } catch (e) {
+        console.warn("Gnani remote LLM extraction skipped, using intelligent parser");
       }
     }
 
-    // 2. Intelligent Indian Spoken Order Parser
-    const clauses = transcript
-      .split(/[,।aur\s+और\s+tatha\s+तथा\s+and\s+]/i)
+    // 2. High-Precision Indian Spoken Clause Parser
+    // Split on commas, Hindi full stops, newlines, or words: aur, और, tatha, तथा, and, with, plus, +
+    const clauses = cleanInput
+      .split(/(?:[,|।\n]|\s+(?:aur|और|tatha|तथा|and|with|plus|\+)\s+)/i)
       .map((s) => s.trim())
-      .filter((s) => s.length > 2);
+      .filter((s) => s.length > 1);
 
     const items: Array<{ spokenItem: string; quantity: number; unit: string }> = [];
-
-    const KNOWN_KEYWORDS = [
-      { key: "atta", label: "Atta", unit: "kg" },
-      { key: "आटा", label: "Atta", unit: "kg" },
-      { key: "aata", label: "Atta", unit: "kg" },
-      { key: "butter", label: "Butter", unit: "packet" },
-      { key: "बटर", label: "Butter", unit: "packet" },
-      { key: "makhan", label: "Butter", unit: "packet" },
-      { key: "cheeni", label: "Sugar", unit: "kg" },
-      { key: "chini", label: "Sugar", unit: "kg" },
-      { key: "चीनी", label: "Sugar", unit: "kg" },
-      { key: "sugar", label: "Sugar", unit: "kg" },
-      { key: "tel", label: "Oil", unit: "litre" },
-      { key: "oil", label: "Oil", unit: "litre" },
-      { key: "तेल", label: "Oil", unit: "litre" },
-      { key: "mustard oil", label: "Mustard Oil", unit: "litre" },
-      { key: "sarson", label: "Mustard Oil", unit: "litre" },
-      { key: "namak", label: "Salt", unit: "packet" },
-      { key: "salt", label: "Salt", unit: "packet" },
-      { key: "नमक", label: "Salt", unit: "packet" },
-      { key: "chai", label: "Tea", unit: "packet" },
-      { key: "tea", label: "Tea", unit: "packet" },
-      { key: "चाय", label: "Tea", unit: "packet" },
-      { key: "chawal", label: "Rice", unit: "kg" },
-      { key: "rice", label: "Rice", unit: "kg" },
-      { key: "चावल", label: "Rice", unit: "kg" },
-      { key: "basmati", label: "Basmati Rice", unit: "kg" },
-      { key: "doodh", label: "Milk", unit: "litre" },
-      { key: "milk", label: "Milk", unit: "litre" },
-      { key: "दूध", label: "Milk", unit: "litre" },
-      { key: "paneer", label: "Paneer", unit: "packet" },
-      { key: "पनीर", label: "Paneer", unit: "packet" },
-      { key: "ghee", label: "Ghee", unit: "litre" },
-      { key: "घी", label: "Ghee", unit: "litre" },
-      { key: "dal", label: "Dal", unit: "kg" },
-      { key: "दाल", label: "Dal", unit: "kg" },
-      { key: "toor", label: "Toor Dal", unit: "kg" },
-      { key: "masala", label: "Garam Masala", unit: "packet" },
-      { key: "मसाला", label: "Garam Masala", unit: "packet" },
-      { key: "biscuit", label: "Biscuits", unit: "packet" },
-      { key: "बिस्कुट", label: "Biscuits", unit: "packet" },
-      { key: "parle", label: "Parle G", unit: "packet" },
-    ];
 
     for (const clause of clauses) {
       const lower = clause.toLowerCase();
 
+      // Detect quantity
       let detectedQty = 1;
-      const numMatch = lower.match(/\b(\d+(?:\.\d+)?)\b/);
+      const numMatch = lower.match(/(?:^|\s)(\d+(?:\.\d+)?)(?:\s|$)/);
       if (numMatch) {
         detectedQty = parseFloat(numMatch[1]);
       } else {
-        for (const [word, val] of Object.entries(HINDI_NUMBER_MAP)) {
-          if (new RegExp(`\\b${word}\\b`, "i").test(lower)) {
-            detectedQty = val;
+        for (const hp of HINDI_NUMBER_PATTERNS) {
+          if (hp.regex.test(` ${lower} `)) {
+            detectedQty = hp.val;
             break;
           }
         }
       }
 
+      // Detect unit
       let detectedUnit = "packet";
-      if (lower.includes("kilo") || lower.includes("kg") || lower.includes("किलो")) {
+      if (/kilo|kg|किलो|kgs/i.test(lower)) {
         detectedUnit = "kg";
-      } else if (lower.includes("litre") || lower.includes("liter") || lower.includes("लीटर") || lower.includes("l")) {
+      } else if (/litre|liter|लीटर|ltr|\bl\b/i.test(lower)) {
         detectedUnit = "litre";
-      } else if (lower.includes("packet") || lower.includes("पैकेट")) {
+      } else if (/packet|पैकेट|pkt|packets|pack/i.test(lower)) {
         detectedUnit = "packet";
-      } else if (lower.includes("gram") || lower.includes("ग्राम") || lower.includes("gm")) {
+      } else if (/gram|ग्राम|gm|\bg\b/i.test(lower)) {
         detectedUnit = "g";
+      } else if (/piece|पीस|pieces|bottle|box|दर्जन|dozen/i.test(lower)) {
+        detectedUnit = "piece";
       }
 
-      for (const itemDef of KNOWN_KEYWORDS) {
-        if (lower.includes(itemDef.key)) {
-          const alreadyAdded = items.some((it) => it.spokenItem === itemDef.label);
-          if (!alreadyAdded) {
-            items.push({
-              spokenItem: itemDef.label,
-              quantity: detectedQty,
-              unit: detectedUnit === "packet" ? itemDef.unit : detectedUnit,
-            });
+      // Detect item
+      let matchedLabel: string | null = null;
+      for (const itemDef of KNOWN_GROCERY_KEYWORDS) {
+        for (const k of itemDef.keys) {
+          if (lower.includes(k.toLowerCase())) {
+            matchedLabel = itemDef.label;
+            if (detectedUnit === "packet" && itemDef.defaultUnit !== "packet") {
+              detectedUnit = itemDef.defaultUnit;
+            }
+            break;
           }
-          break;
+        }
+        if (matchedLabel) break;
+      }
+
+      // If matched, push identified item
+      if (matchedLabel) {
+        const already = items.find((it) => it.spokenItem === matchedLabel);
+        if (already) {
+          already.quantity += detectedQty;
+        } else {
+          items.push({
+            spokenItem: matchedLabel,
+            quantity: detectedQty,
+            unit: detectedUnit,
+          });
+        }
+      } else {
+        // Fallback: clean out quantities, units and filler words
+        const cleaned = clause
+          .replace(/(?:^|\s)(\d+(?:\.\d+)?)(?:\s|$)/g, " ")
+          .replace(
+            /\b(ek|do|teen|chaar|char|paanch|panch|che|saat|aath|nau|dus|das|aadha|adha|half|paav|pav|one|two|three|four|five|ten)\b/gi,
+            " "
+          )
+          .replace(/\b(एक|दो|तीन|चार|पाँच|पांच|छह|सात|आठ|नौ|दस|आधा|पाव)\b/g, " ")
+          .replace(/\b(kilo|kg|किलो|litre|liter|लीटर|ltr|packet|पैकेट|pkt|gram|ग्राम|gm|piece|pieces|packets|pack)\b/gi, " ")
+          .replace(/\b(chahiye|चाहिए|dedo|de do|दे दो|lao|dena|mangwa do|bhej do|kripya|please|plz)\b/gi, " ")
+          .replace(/\s+/g, " ")
+          .trim();
+
+        if (cleaned.length > 1) {
+          items.push({
+            spokenItem: cleaned,
+            quantity: detectedQty,
+            unit: detectedUnit,
+          });
         }
       }
     }
 
+    // Default safety fallback if nothing could be parsed
     if (items.length === 0) {
       items.push({
-        spokenItem: transcript.slice(0, 30),
+        spokenItem: cleanInput.slice(0, 30),
         quantity: 1,
         unit: "piece",
       });
     }
 
-    return NextResponse.json({ success: true, items });
+    return NextResponse.json({ success: true, count: items.length, items });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }

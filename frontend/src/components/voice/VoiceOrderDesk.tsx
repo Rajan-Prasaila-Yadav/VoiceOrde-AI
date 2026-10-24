@@ -174,6 +174,8 @@ export function VoiceOrderDesk() {
     setOrderItems((prev) => prev.filter((it) => it.productId !== productId));
   };
 
+  const latestTranscriptRef = React.useRef("");
+
   // Simulate audio capture or web speech
   const toggleRecording = () => {
     if (isRecording) {
@@ -186,6 +188,7 @@ export function VoiceOrderDesk() {
   const startRecording = () => {
     setIsRecording(true);
     setTranscript("");
+    latestTranscriptRef.current = "";
     setError(null);
 
     const SpeechRecognition =
@@ -199,32 +202,55 @@ export function VoiceOrderDesk() {
         recognition.interimResults = true;
 
         recognition.onresult = (event: any) => {
-          const current = event.resultIndex;
-          const text = event.results[current][0].transcript;
-          setTranscript(text);
+          let currentText = "";
+          for (let i = 0; i < event.results.length; i++) {
+            currentText += event.results[i][0].transcript;
+          }
+          setTranscript(currentText);
+          latestTranscriptRef.current = currentText;
         };
 
         recognition.onend = () => {
           setIsRecording(false);
+          const finalSpoken = latestTranscriptRef.current.trim();
+          if (finalSpoken) {
+            processTranscript(finalSpoken);
+          }
         };
 
-        recognition.onerror = () => {
+        recognition.onerror = (event: any) => {
           setIsRecording(false);
+          const errType = event.error || "unknown";
+          if (errType === "not-allowed") {
+            setError(
+              "Microphone permission was denied. Please allow microphone in browser address bar, or use the quick sample order buttons below."
+            );
+          } else if (errType === "no-speech") {
+            setError("No speech was heard. Please speak close to your microphone or try a sample order.");
+          } else if (errType === "network") {
+            setError("Speech network connection issue. You can type or use the sample orders below.");
+          } else {
+            console.warn("Speech recognition notice:", errType);
+          }
         };
 
         (window as any)._rec = recognition;
         recognition.start();
         return;
-      } catch (err) {
-        console.warn("SpeechRecognition fallback to sample audio");
+      } catch (err: any) {
+        console.warn("SpeechRecognition start failed, fallback to sample", err);
       }
     }
 
-    // Default simulation for testing
+    // Default simulation for browsers without Web Speech API
+    setError("Web Speech is not supported on this browser/environment. Loading demo spoken order...");
     setTimeout(() => {
-      setTranscript("दो किलो आटा, एक पैकेट अमूल बटर और एक किलो चीनी चाहिए");
+      const demo = "दो किलो आटा, एक पैकेट अमूल बटर और एक किलो चीनी चाहिए";
+      setTranscript(demo);
+      latestTranscriptRef.current = demo;
       setIsRecording(false);
-    }, 2500);
+      processTranscript(demo);
+    }, 1500);
   };
 
   const stopRecording = () => {
@@ -234,57 +260,94 @@ export function VoiceOrderDesk() {
         (window as any)._rec.stop();
       } catch (e) {}
     }
+    if (latestTranscriptRef.current.trim()) {
+      processTranscript(latestTranscriptRef.current.trim());
+    }
   };
 
   // Process transcript with Gnani Evon LLM & Match with Live Catalogue
-  const processTranscript = async () => {
-    if (!transcript.trim()) return;
+  const processTranscript = async (customText?: string) => {
+    const textToProcess = (typeof customText === "string" ? customText : transcript).trim();
+    if (!textToProcess) return;
     setProcessing(true);
     setError(null);
 
     try {
+      // Ensure products are loaded
+      let activeCatalogue = products;
+      if (!activeCatalogue || activeCatalogue.length === 0) {
+        try {
+          activeCatalogue = await ApiClient.getProducts();
+          if (activeCatalogue && activeCatalogue.length > 0) {
+            setProducts(activeCatalogue);
+          }
+        } catch (e) {}
+      }
+
       const res = await fetch("/api/gnani/extract", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ transcript }),
+        body: JSON.stringify({ transcript: textToProcess }),
       });
 
       const json = await res.json();
       const extracted = json.items || [];
 
-      // Match extracted items against real catalogue products
+      // Match extracted items against real catalogue products safely
       const matched = extracted.map((ext: any) => {
-        const spoken = ext.spokenItem.toLowerCase();
-        const found = products.find(
-          (p) =>
-            p.name.toLowerCase().includes(spoken) ||
-            (p.hindiName && p.hindiName.includes(spoken)) ||
-            (p.brand && spoken.includes(p.brand.toLowerCase())) ||
-            p.aliases?.some((a) => spoken.includes(a.toLowerCase()))
-        );
+        const spoken = (ext.spokenItem || "").toLowerCase().trim();
+
+        const found = (activeCatalogue || []).find((p) => {
+          const nameLower = (p.name || "").toLowerCase();
+          const hindiLower = (p.hindiName || "").toLowerCase();
+          const brandLower = (p.brand || "").toLowerCase();
+
+          // Safe alias normalization (handles string, array, or null)
+          const aliasStr = Array.isArray(p.aliases)
+            ? p.aliases.join(" ")
+            : typeof p.aliases === "string"
+            ? p.aliases
+            : "";
+          const aliasLower = aliasStr.toLowerCase();
+
+          // Direct includes checks
+          if (nameLower.includes(spoken) || spoken.includes(nameLower)) return true;
+          if (hindiLower && (hindiLower.includes(spoken) || spoken.includes(hindiLower))) return true;
+          if (brandLower && (spoken.includes(brandLower) || brandLower.includes(spoken))) return true;
+          if (aliasLower && aliasLower.includes(spoken)) return true;
+
+          // Token matching
+          const tokens = spoken.split(/\s+/).filter((t: string) => t.length > 2);
+          for (const token of tokens) {
+            if (nameLower.includes(token) || (aliasLower && aliasLower.includes(token))) {
+              return true;
+            }
+          }
+          return false;
+        });
 
         if (found) {
           const unitPrice = found.sellingPrice;
           return {
             productId: found.id,
-            productName: `${found.brand ? found.brand + " " : ""}${found.name}`,
+            productName: `${found.brand ? found.brand + " " : ""}${found.name}`.trim(),
             unit: found.unit,
-            quantity: ext.quantity,
+            quantity: ext.quantity || 1,
             unitPrice,
-            totalPrice: unitPrice * ext.quantity,
+            totalPrice: unitPrice * (ext.quantity || 1),
             availableStock: found.availableStock,
-            stockError: found.availableStock < ext.quantity,
+            stockError: found.availableStock < (ext.quantity || 1),
           };
         }
 
         // Unmatched fallback
         return {
-          productId: "unmatched-" + Math.random(),
+          productId: "unmatched-" + Math.random().toString(36).substring(2, 9),
           productName: ext.spokenItem,
-          unit: ext.unit,
-          quantity: ext.quantity,
+          unit: ext.unit || "piece",
+          quantity: ext.quantity || 1,
           unitPrice: 50,
-          totalPrice: 50 * ext.quantity,
+          totalPrice: 50 * (ext.quantity || 1),
           availableStock: 10,
           stockError: false,
         };
@@ -415,8 +478,12 @@ export function VoiceOrderDesk() {
               {SAMPLE_SPOKEN_ORDERS.map((sample, idx) => (
                 <button
                   key={idx}
-                  onClick={() => setTranscript(sample.text)}
+                  onClick={() => {
+                    setTranscript(sample.text);
+                    processTranscript(sample.text);
+                  }}
                   className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-[11px] font-semibold text-slate-700 dark:text-slate-300 hover:border-emerald-500 hover:text-emerald-600 transition-colors cursor-pointer"
+                  title="Click to instantly parse and populate items"
                 >
                   {sample.label}
                 </button>
@@ -438,7 +505,7 @@ export function VoiceOrderDesk() {
 
             <div className="flex items-center justify-center gap-3">
               <button
-                onClick={processTranscript}
+                onClick={() => processTranscript()}
                 disabled={!transcript.trim() || processing}
                 className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs sm:text-sm font-semibold shadow-md shadow-emerald-600/20 disabled:opacity-50 transition-all cursor-pointer"
               >
