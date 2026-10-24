@@ -28,6 +28,7 @@ import {
   Printer,
   Share2,
   Tag,
+  Check,
 } from "lucide-react";
 import { ProductItem, OrderRecord } from "@/types";
 import { ApiClient } from "@/lib/api-client";
@@ -41,6 +42,66 @@ interface ChatMessage {
   speakLang?: string;
   lastDiscussedProductId?: string;
 }
+
+interface GnaniVoiceOption {
+  model: "timbre-v3.0" | "timbre-v2.5";
+  voice: string;
+  name: string;
+  gender: "female" | "male";
+  badge: string;
+  description: string;
+}
+
+const GNANI_VOICE_MODELS: GnaniVoiceOption[] = [
+  {
+    model: "timbre-v3.0",
+    voice: "Shivani",
+    name: "Shivani",
+    gender: "female",
+    badge: "v3.0 Modern",
+    description: "Crisp conversational tone for kirana store orders",
+  },
+  {
+    model: "timbre-v3.0",
+    voice: "Devansh",
+    name: "Devansh",
+    gender: "male",
+    badge: "v3.0 Modern",
+    description: "Warm friendly male assistant persona",
+  },
+  {
+    model: "timbre-v3.0",
+    voice: "Lakshmi",
+    name: "Lakshmi",
+    gender: "female",
+    badge: "v3.0 Indic",
+    description: "Traditional Indic pronunciation & rhythm",
+  },
+  {
+    model: "timbre-v2.5",
+    voice: "Nalini",
+    name: "Nalini",
+    gender: "female",
+    badge: "v2.5 Standard",
+    description: "Benchmark clear voice for telephony & bills",
+  },
+  {
+    model: "timbre-v2.5",
+    voice: "Deepak",
+    name: "Deepak",
+    gender: "male",
+    badge: "v2.5 Standard",
+    description: "Authoritative classic male shopkeeper voice",
+  },
+  {
+    model: "timbre-v2.5",
+    voice: "Radhika",
+    name: "Radhika",
+    gender: "female",
+    badge: "v2.5 Standard",
+    description: "Melodic Hindi voice for order readbacks",
+  },
+];
 
 const SAMPLE_INTERACTIONS = [
   {
@@ -117,6 +178,21 @@ export function VoiceOrderDesk() {
   const latestTranscriptRef = useRef("");
   const chatBottomRef = useRef<HTMLDivElement>(null);
   const gnaniAudioRef = useRef<HTMLAudioElement | null>(null);
+
+  // Custom Dropdown State for Gnani Voice Model & Speaker
+  const [showVoiceDropdown, setShowVoiceDropdown] = useState(false);
+  const voiceDropdownRef = useRef<HTMLDivElement>(null);
+
+  // Close voice dropdown on outside click
+  useEffect(() => {
+    const handleOutsideClick = (event: MouseEvent) => {
+      if (voiceDropdownRef.current && !voiceDropdownRef.current.contains(event.target as Node)) {
+        setShowVoiceDropdown(false);
+      }
+    };
+    document.addEventListener("mousedown", handleOutsideClick);
+    return () => document.removeEventListener("mousedown", handleOutsideClick);
+  }, []);
 
   // Scroll chat to bottom on new messages
   useEffect(() => {
@@ -641,14 +717,14 @@ export function VoiceOrderDesk() {
           </p>
 
           {/* Dual Voice Controls: Spoken Language & Gnani AI Voice Model */}
-          <div className="flex flex-wrap items-center justify-center gap-3 pt-1">
+          <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
             {/* Spoken Language Selector */}
             <div className="flex items-center gap-1.5">
               <span className="text-xs text-slate-500 font-medium">Input Language:</span>
               <select
                 value={selectedLanguage}
                 onChange={(e) => setSelectedLanguage(e.target.value)}
-                className="px-3 py-1.5 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-500 cursor-pointer font-medium"
+                className="px-3 py-1.5 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500 cursor-pointer font-medium shadow-xs [&>option]:bg-slate-900 [&>option]:text-white"
               >
                 <option value="hi-IN">Hindi (हिन्दी / Hinglish)</option>
                 <option value="en-IN">Indian English</option>
@@ -661,25 +737,96 @@ export function VoiceOrderDesk() {
               </select>
             </div>
 
-            {/* Gnani AI Voice Model & Speaker Selector */}
-            <div className="flex items-center gap-1.5">
-              <span className="text-xs text-slate-500 font-medium">Gnani Voice Model:</span>
-              <select
-                value={`${selectedGnaniModel}:${selectedGnaniVoice}`}
-                onChange={(e) => {
-                  const [m, v] = e.target.value.split(":");
-                  setSelectedGnaniModel(m as any);
-                  setSelectedGnaniVoice(v);
-                }}
-                className="px-3 py-1.5 text-xs rounded-xl border border-emerald-500/40 bg-emerald-50/70 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300 font-semibold focus:outline-none focus:ring-2 focus:ring-emerald-500 cursor-pointer shadow-xs"
-              >
-                <option value="timbre-v3.0:Shivani">Timbre v3.0 • Shivani (Female - Modern Indic)</option>
-                <option value="timbre-v3.0:Devansh">Timbre v3.0 • Devansh (Male - Modern Indic)</option>
-                <option value="timbre-v3.0:Lakshmi">Timbre v3.0 • Lakshmi (Female - Indic)</option>
-                <option value="timbre-v2.5:Nalini">Timbre v2.5 • Nalini (Female - Standard)</option>
-                <option value="timbre-v2.5:Deepak">Timbre v2.5 • Deepak (Male - Standard)</option>
-                <option value="timbre-v2.5:Radhika">Timbre v2.5 • Radhika (Female)</option>
-              </select>
+            {/* Custom Interactive Popover Dropdown for Gnani AI Voice Model */}
+            <div className="relative inline-block" ref={voiceDropdownRef}>
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs text-slate-500 font-medium">Gnani Voice Model:</span>
+                <button
+                  type="button"
+                  onClick={() => setShowVoiceDropdown((prev) => !prev)}
+                  className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl border border-emerald-500/40 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-bold text-xs hover:border-emerald-500 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all cursor-pointer shadow-xs ring-1 ring-emerald-500/20"
+                  title="Choose Gnani AI voice model and speaker"
+                >
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                  <span className="font-extrabold text-emerald-600 dark:text-emerald-400">
+                    {selectedGnaniModel}
+                  </span>
+                  <span className="text-slate-700 dark:text-slate-300 font-semibold">
+                    • {selectedGnaniVoice}
+                  </span>
+                  <ChevronDown
+                    className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-200 ${
+                      showVoiceDropdown ? "rotate-180" : ""
+                    }`}
+                  />
+                </button>
+              </div>
+
+              {/* Popover Floating Menu */}
+              {showVoiceDropdown && (
+                <div className="absolute left-1/2 -translate-x-1/2 sm:left-auto sm:right-0 sm:translate-x-0 mt-2 w-72 sm:w-80 rounded-2xl bg-slate-900 border border-slate-700/80 shadow-2xl p-2 z-50 animate-in fade-in zoom-in-95 duration-150 backdrop-blur-xl ring-1 ring-black/50">
+                  <div className="px-3 py-2 border-b border-slate-800 flex items-center justify-between">
+                    <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
+                      Gnani Speech Platform (Vachana)
+                    </span>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-950/80 text-emerald-400 font-bold border border-emerald-500/30">
+                      Live Neural API
+                    </span>
+                  </div>
+
+                  <div className="py-1 space-y-1 max-h-72 overflow-y-auto">
+                    {GNANI_VOICE_MODELS.map((item) => {
+                      const isSelected =
+                        selectedGnaniModel === item.model && selectedGnaniVoice === item.voice;
+                      return (
+                        <button
+                          key={`${item.model}-${item.voice}`}
+                          type="button"
+                          onClick={() => {
+                            setSelectedGnaniModel(item.model);
+                            setSelectedGnaniVoice(item.voice);
+                            setShowVoiceDropdown(false);
+                          }}
+                          className={`w-full text-left p-2.5 rounded-xl flex items-start justify-between gap-2.5 transition-all cursor-pointer ${
+                            isSelected
+                              ? "bg-emerald-950/60 border border-emerald-500/40 text-emerald-200 shadow-sm"
+                              : "hover:bg-slate-800/80 text-slate-200"
+                          }`}
+                        >
+                          <div className="space-y-0.5">
+                            <div className="flex items-center gap-2">
+                              <span className="font-extrabold text-xs text-white">
+                                {item.name}
+                              </span>
+                              <span
+                                className={`text-[10px] px-1.5 py-0.5 rounded-md font-bold ${
+                                  item.model === "timbre-v3.0"
+                                    ? "bg-purple-950 text-purple-300 border border-purple-500/30"
+                                    : "bg-blue-950 text-blue-300 border border-blue-500/30"
+                                }`}
+                              >
+                                {item.badge}
+                              </span>
+                              <span className="text-[10px] text-slate-400 capitalize">
+                                ({item.gender})
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-slate-400 leading-tight">
+                              {item.description}
+                            </p>
+                          </div>
+
+                          {isSelected && (
+                            <div className="shrink-0 pt-0.5 text-emerald-400">
+                              <Check className="w-4 h-4 stroke-[2.5]" />
+                            </div>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
