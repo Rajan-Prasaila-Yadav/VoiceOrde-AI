@@ -113,29 +113,40 @@ function scoreProductMatch(product: any, queryLower: string, queryWords: Set<str
 }
 
 /**
- * Extracts quantity from text
+ * Extracts quantity from text and returns whether quantity was explicitly stated
  */
-function extractQuantity(textLower: string): { qty: number; unit?: string } {
-  let qty = 1;
+function extractQuantity(textLower: string): { qty: number; unit?: string; hasExplicitQuantity: boolean } {
+  let qty = 0;
+  let hasExplicitQuantity = false;
+  let unit: string | undefined;
+
   const numMatch = textLower.match(/(?:^|\s)(\d+(?:\.\d+)?)\s*(k|kg|kilo|किलो|litre|liter|लीटर|packet|पैकेट|gram|ग्राम)?(?:\s|$)/i);
   if (numMatch) {
     qty = parseFloat(numMatch[1]);
+    hasExplicitQuantity = true;
   } else {
     for (const hp of HINDI_NUMBER_PATTERNS) {
       if (hp.regex.test(` ${textLower} `)) {
         qty = hp.val;
+        hasExplicitQuantity = true;
         break;
       }
     }
   }
 
-  let unit: string | undefined;
   if (/kilo|kg|किलो|k(?:\s|$)/i.test(textLower)) unit = "kg";
   else if (/litre|liter|लीटर|ltr/i.test(textLower)) unit = "litre";
   else if (/packet|पैकेट|pkt/i.test(textLower)) unit = "packet";
   else if (/gram|ग्राम|gm/i.test(textLower)) unit = "g";
 
-  return { qty, unit };
+  if (!hasExplicitQuantity && unit) {
+    qty = 1;
+    hasExplicitQuantity = true;
+  } else if (!hasExplicitQuantity) {
+    qty = 1; // Default to 1 if user asks for an item by name without specifying number
+  }
+
+  return { qty, unit, hasExplicitQuantity };
 }
 
 export async function POST(req: Request) {
@@ -197,10 +208,10 @@ export async function POST(req: Request) {
 
     // =========================================================================
     // 1. INTENT: ORDER CONFIRMATION
-    // Matches: "confirm", "confirm order", "कन्फर्म", "कंफर्म", "बस इतना ही", "itna hi chahiye"
+    // Matches: "confirm", "conform", "confrom", "कन्फर्म", "कंफर्म", "बस इतना ही", "itna hi chahiye"
     // =========================================================================
     const isConfirmingOrder =
-      /(confirm|confirm order|कन्फर्म|कंफर्म|order kar do|order book karo|order place kar do|bas itna hi|aur kuch nahi|nahi bas|nahi aur nahi|itna hi chahiye|बस इतना ही)/i.test(
+      /(confirm|conform|confrom|conferm|कन्फर्म|कंफर्म|order confirm|confirm kar do|order kar do|order book karo|order place kar do|bas itna hi|aur kuch nahi|nahi bas|nahi aur nahi|itna hi chahiye|बस इतना ही|होगया|हो गया)/i.test(
         queryLower
       );
 
@@ -210,19 +221,23 @@ export async function POST(req: Request) {
         const discount = currentDiscount || 0;
         const grandTotal = Math.max(0, subtotal - discount);
 
-        const itemsList = currentCart
-          .map((it: any) => `${it.quantity} ${it.unit} ${it.productName} (₹${it.totalPrice})`)
-          .join(", ");
+        const itemsBulletList = currentCart
+          .map((it: any) => `• **${it.quantity} ${it.unit}** ${it.productName} — ₹${it.totalPrice}`)
+          .join("\n");
 
-        const reply = `Ji shukriya! Aapka final order: ${itemsList}. Subtotal ₹${subtotal}${
-          discount > 0 ? `, Discount: ₹${discount}` : ""
-        }, Grand Total: ₹${grandTotal}. Kripya neeche Confirm Order button tap karein aur delivery address check karein!`;
+        const reply = isEnglishQuery
+          ? `Thank you! Here is your final order summary:\n\n${itemsBulletList}\n\n🧾 **Bill Summary:**\n• Subtotal: ₹${subtotal}${discount > 0 ? `\n• Discount: ₹${discount}` : ""}\n• **Grand Total: ₹${grandTotal}**\n\nPlease tap the **Confirm Order** button below to complete your order and review the delivery address!`
+          : `जी शुक्रिया! आपका फाइनल आर्डर तैयार है:\n\n${itemsBulletList}\n\n🧾 **बिल सारांश (Bill Summary):**\n• Subtotal: ₹${subtotal}${discount > 0 ? `\n• Discount: ₹${discount}` : ""}\n• **Grand Total: ₹${grandTotal}**\n\nकृपया नीचे **Confirm Order** बटन दबाकर अपना आर्डर पूरा करें और डिलीवरी पता चेक करें!`;
+
+        const speakText = isEnglishQuery
+          ? `Thank you! Your final order summary is ready. Subtotal is ₹${subtotal}${discount > 0 ? `, Discount is ₹${discount}` : ""}, and Grand Total is ₹${grandTotal}. Please tap Confirm Order below to finish!`
+          : `जी शुक्रिया! आपका फाइनल आर्डर तैयार है। सबटोटल ₹${subtotal}${discount > 0 ? `, डिस्काउंट ₹${discount}` : ""}, और कुल राशि ₹${grandTotal} है। कृपया नीचे कन्फर्म आर्डर बटन दबाएं!`;
 
         return NextResponse.json({
           success: true,
           intent: "CONFIRM_FINAL_SUMMARY",
           reply,
-          speakText: reply,
+          speakText,
           items: [],
           readyToConfirm: true,
         });
@@ -258,31 +273,116 @@ export async function POST(req: Request) {
       } else if (currentSubtotal >= 500) {
         discountToGive = Math.round(currentSubtotal * 0.05);
         const newTotal = currentSubtotal - discountToGive;
-        reply = `Bilkul! Aapke ₹${currentSubtotal} ke order par maine ₹${discountToGive} (5% discount) apply kar diya hai. Ab aapka naya total ₹${newTotal} hai. Kya aap order confirm karna chahte hain, ya kuch aur add karein?`;
+        reply = isEnglishQuery
+          ? `Awesome! I have applied a **₹${discountToGive} discount** (5% off) to your order.\n\n🧾 **Updated Bill:**\n• Subtotal: ₹${currentSubtotal}\n• Discount: ₹${discountToGive}\n• **Grand Total: ₹${newTotal}**\n\nWould you like to confirm the order now, or add anything else?`
+          : `बिल्कुल! आपके ₹${currentSubtotal} के आर्डर पर मैंने **₹${discountToGive} (5% छूट)** लगा दी है!\n\n🧾 **नया बिल सारांश:**\n• Subtotal: ₹${currentSubtotal}\n• Discount: ₹${discountToGive}\n• **Grand Total: ₹${newTotal}**\n\nक्या आप अभी आर्डर कन्फर्म करना चाहते हैं, या कुछ और सामान जोड़ना है?`;
       } else {
         discountToGive = 20;
         const newTotal = Math.max(0, currentSubtotal - discountToGive);
-        reply = `Theek hai! Aapke order par ₹20 ka special discount laga diya hai. Naya total ₹${newTotal} ho gaya hai. Kya order confirm karein?`;
+        reply = isEnglishQuery
+          ? `Sure! I have applied a special **₹20 discount** on your order.\n\n🧾 **Updated Bill:**\n• Subtotal: ₹${currentSubtotal}\n• Discount: ₹20\n• **Grand Total: ₹${newTotal}**\n\nWould you like to confirm the order?`
+          : `ठीक है! आपके आर्डर पर **₹20 का स्पेशल डिस्काउंट** लगा दिया है।\n\n🧾 **नया बिल सारांश:**\n• Subtotal: ₹${currentSubtotal}\n• Discount: ₹20\n• **Grand Total: ₹${newTotal}**\n\nक्या आर्डर कन्फर्म करें?`;
       }
+
+      const speakText = isEnglishQuery
+        ? `I have applied a discount of ₹${discountToGive} on your order. Your new grand total is ₹${currentSubtotal - discountToGive}. Would you like to confirm?`
+        : `मैंने आपके आर्डर पर ₹${discountToGive} का डिस्काउंट लगा दिया है। नया टोटल ₹${currentSubtotal - discountToGive} हो गया है। क्या आर्डर कन्फर्म करें?`;
 
       return NextResponse.json({
         success: true,
         intent: "DISCOUNT_APPLIED",
         reply,
-        speakText: reply,
+        speakText,
         items: [],
         appliedDiscount: discountToGive,
       });
     }
 
     // =========================================================================
-    // 3. INTENT: CONVERSATIONAL & STORE QUERIES (Dynamic Kirana Shopkeeper Voice)
+    // 3. INTENT: PERSONA, IDENTITY & CONVERSATIONAL (Dynamic Kirana Assistant)
     // =========================================================================
-    // A) How are you / हाल चाल
+
+    // A) Who are you / हु आर यू / tum kaun ho
+    if (/(who are you|who are u|who r u|हु आर यू|तुम कौन हो|आप कौन हैं|tum kaun ho|aap kaun ho|who made you|about you)/i.test(queryLower)) {
+      const reply = isEnglishQuery
+        ? `Hello! I am the **AI Store Assistant** for **${shopName}** 🛍️.\n\nHere is what I can do for you:\n• 📦 Check live **prices and stock** for any grocery item\n• 🛒 **Add or update items** in your digital shopping cart\n• 💰 Apply **discounts and festival offers**\n• 🚚 Book **30-minute free doorstep delivery**\n\nWhat grocery items would you like to order today?`
+        : `नमस्ते! मैं **${shopName}** का AI डिजिटल सहायक हूँ 🛒।\n\nमैं आपकी इस प्रकार सहायता कर सकता हूँ:\n• 📦 किसी भी किराना सामान का **ताज़ा भाव और स्टॉक** बता सकता हूँ\n• 🛒 सामान आपके **कार्ट में जोड़ या हटा** सकता हूँ\n• 💰 आर्डर पर **डिस्काउंट और छूट** लगा सकता हूँ\n• 🚚 आपकी **फ्री होम डिलीवरी** बुक कर सकता हूँ\n\nबोलकर बताइये, आज आपको घर के लिए क्या सामान चाहिए?`;
+
+      const speakText = isEnglishQuery
+        ? `Hello! I am the AI Store Assistant for ${shopName}. You can ask about item prices, stock, or tell me to add groceries to your cart. How can I help you today?`
+        : `नमस्ते! मैं ${shopName} का AI सहायक हूँ। आप किसी भी सामान का भाव पूछ सकते हैं या सीधे आर्डर दे सकते हैं। बताइये आपको क्या सामान चाहिए?`;
+
+      return NextResponse.json({
+        success: true,
+        intent: "CHITCHAT_WHO_ARE_YOU",
+        reply,
+        speakText,
+        items: [],
+      });
+    }
+
+    // B) What can you do / व्हाट कैन यू दो / व्हाट कैन यू डू / kya kar sakte ho
+    if (/(what can you do|what can u do|व्हाट कैन यू दो|व्हाट कैन यू डू|व्हाट कैन यू|क्या कर सकते हो|क्या क्या कर सकते हो|kya kar sakte ho|aap kya karte ho|help me with)/i.test(queryLower)) {
+      const reply = isEnglishQuery
+        ? `I am your voice-powered neighbourhood Kirana assistant! You can speak naturally just like talking to your shopkeeper:\n\n• 🌾 *"What is the price of Aashirvaad Atta?"*\n• 🛢️ *"Add 2 litres Fortune oil and 1 packet Tata salt to my cart"*\n• 🏷️ *"Is there any discount on this order?"*\n• ✅ *"Confirm my order"*\n\nTell me, what grocery do you need right now?`
+        : `मैं **${shopName}** का स्मार्ट वॉइस असिस्टेंट हूँ! आप मुझसे सीधे बोलचाल की भाषा में बात कर सकते हैं:\n\n• 🌾 *"आशीर्वाद आटा का क्या भाव है?"*\n• 🛢️ *"2 लीटर फॉर्च्यून तेल और 1 पैकेट टाटा नमक कार्ट में डाल दो"*\n• 🏷️ *"क्या इस आर्डर पर कोई डिस्काउंट मिलेगा?"*\n• ✅ *"बस इतना ही, आर्डर कन्फर्म कर दो"*\n\nबताइये, अभी किस सामान की ज़रूरत है?`;
+
+      const speakText = isEnglishQuery
+        ? `I am your Kirana voice assistant! You can ask for prices, add groceries to your cart, ask for discounts, or confirm your order. What would you like to order today?`
+        : `मैं आपका किराना वॉइस असिस्टेंट हूँ! आप भाव पूछ सकते हैं, सामान कार्ट में जुड़वा सकते हैं, छूट मांग सकते हैं या आर्डर कन्फर्म कर सकते हैं। बताइये क्या चाहिए?`;
+
+      return NextResponse.json({
+        success: true,
+        intent: "CHITCHAT_WHAT_CAN_YOU_DO",
+        reply,
+        speakText,
+        items: [],
+      });
+    }
+
+    // C) Tum bhaiya ho ya behan ji ho / भैया हो या बहन / bhaiya ho ya family ho / gender persona
+    if (/(bhaiya ho ya|bhaiya ya|behan ji|ladka ho ya ladki|male or female|gender|भैया हो या|भैया या बहन|बहन जी|लड़का हो या लड़की|भैया हो या फैमिली)/i.test(queryLower)) {
+      const reply = isEnglishQuery
+        ? `Haha! 😊 I am the Kirana AI Assistant for **${shopName}**. You can consider me your digital *Bhaiya* or *Behenji* — I am always here to help you get fresh groceries delivered quickly!\n\nYou can also switch my speaking voice anytime using the **Gnani Voice Studio** at the top (choose between Shivani, Devansh, Lakshmi, Nalini, or Deepak).\n\nWhat grocery would you like to order today?`
+        : `हाहा! 😊 मैं **${shopName}** का AI सहायक हूँ — आप मुझे चाहे दुकान वाले **भैया** समझें या डिजिटल **दीदी**, मैं हमेशा आपकी सेवा और ताज़ा किराना आपके घर पहुँचाने के लिए हाज़िर हूँ!\n\nआप ऊपर **Gnani Voice Studio** से मेरी आवाज़ भी बदल सकते हैं (जैसे Shivani, Devansh, Lakshmi, Nalini या Deepak)।\n\nबताइये आज घर के लिए क्या सामान मँगवाना है?`;
+
+      const speakText = isEnglishQuery
+        ? `Haha! I am the Kirana AI Assistant for ${shopName}. You can call me Bhaiya or Behenji. You can also change my voice in the Voice Studio above. What would you like to order?`
+        : `हाहा! मैं ${shopName} का AI सहायक हूँ। आप मुझे भैया या दीदी कुछ भी कह सकते हैं। आप ऊपर वॉइस स्टूडियो से आवाज़ भी बदल सकते हैं। बताइये क्या सामान चाहिए?`;
+
+      return NextResponse.json({
+        success: true,
+        intent: "CHITCHAT_PERSONA_GENDER",
+        reply,
+        speakText,
+        items: [],
+      });
+    }
+
+    // D) What is Noun / संज्ञा क्या है / grammar / definitions
+    if (/(what is noun|noun kya|noun kise|व्हाट इस नाउन|संज्ञा क्या|संज्ञा किसे|definition of noun)/i.test(queryLower)) {
+      const reply = isEnglishQuery
+        ? `📖 **Noun (संज्ञा):**\nA noun is a word that names a person, place, animal, thing, or concept (for example: **Aashirvaad Atta, Rice, Sugar, Yadav Store, Rajan**)! 😊\n\nBy the way, I am your grocery store assistant at **${shopName}**. We have fresh flour, rice, cooking oils, dairy, pulses, and spices ready for delivery. What can I pack for your kitchen today?`
+        : `📖 **Noun (संज्ञा):**\nकिसी व्यक्ति, वस्तु, स्थान, प्राणी या भाव के नाम को Noun (संज्ञा) कहते हैं (जैसे: **Atta, Chawal, Yadav Store, Rajan**)! 😊\n\nवैसे मैं आपका किराना स्टोर सहायक हूँ — हमारे पास ताज़ा दाल, आटा, तेल, मसाले सब बढ़िया भाव में उपलब्ध हैं। आज घर के लिए क्या सामान मँगवाना है?`;
+
+      const speakText = isEnglishQuery
+        ? `A noun is the name of a person, place, animal, or thing, like Atta, Sugar, or Rajan! By the way, what groceries can I pack for you today?`
+        : `संज्ञा किसी व्यक्ति, वस्तु, स्थान या भाव के नाम को कहते हैं, जैसे आटा, चावल या दुकान! वैसे रसोई के लिए आज क्या सामान चाहिए?`;
+
+      return NextResponse.json({
+        success: true,
+        intent: "CHITCHAT_GENERAL_KNOWLEDGE",
+        reply,
+        speakText,
+        items: [],
+      });
+    }
+
+    // E) How are you / हाल चाल
     if (/(how are you|how r u|kaise ho|हाउ आर यू|कैसे हो|हाल चाल|hal chal)/i.test(queryLower)) {
       const reply = isEnglishQuery
-        ? `I am doing great, thank you! Welcome to ${shopName}. How may I help you with your groceries today?`
-        : `नमस्ते! मैं बिल्कुल ठीक हूँ, पूछने के लिए धन्यवाद। ${shopName} में आपका स्वागत है! आज आपकी क्या सेवा करूँ? घर के लिए क्या सामान मँगवाना है?`;
+        ? `I am doing great, thank you! Welcome to **${shopName}**. What fresh groceries can I get delivered for you today?`
+        : `नमस्ते! मैं बिल्कुल ठीक हूँ, पूछने के लिए धन्यवाद। **${shopName}** में आपका स्वागत है! आज आपकी क्या सेवा करूँ? घर के लिए क्या सामान मँगवाना है?`;
       return NextResponse.json({
         success: true,
         intent: "CHITCHAT_HOW_ARE_YOU",
@@ -292,10 +392,10 @@ export async function POST(req: Request) {
       });
     }
 
-    // B) Delivery Coverage & City / किस किस शहर में
+    // F) Delivery Coverage & City / किस किस शहर में
     if (/(किस किस शहर|कहाँ कहाँ|शहर|delivery location|which city|delivery areas|kahan deliver|coverage|service area)/i.test(queryLower)) {
       const reply = isEnglishQuery
-        ? `We operate from ${shopName} (Main Market) and deliver across all nearby localities within 30 to 45 minutes! Just tell us your address and what you need.`
+        ? `We operate from **${shopName}** (Main Market) and deliver across all nearby localities within 30 to 45 minutes! Just tell us your address and what you need.`
         : `हमारा स्टोर Shop No. 12, Main Market में स्थित है और हम आसपास के सभी लोकल एरिया में 30 से 45 मिनट के अंदर फ्री होम डिलीवरी करते हैं! आप अपना पता बताइये और जो सामान चाहिए निसंकोच बोलिए।`;
       return NextResponse.json({
         success: true,
@@ -306,10 +406,10 @@ export async function POST(req: Request) {
       });
     }
 
-    // C) Timings / Opening hours
+    // G) Timings / Opening hours
     if (/(timing|time|kab khulti|open time|opening hour|dukaan kab)/i.test(queryLower)) {
       const reply = isEnglishQuery
-        ? `${shopName} is open 7 days a week from 7:00 AM to 10:00 PM. You can place voice orders anytime!`
+        ? `**${shopName}** is open 7 days a week from 7:00 AM to 10:00 PM. You can place voice orders anytime!`
         : `हमारी दुकान सुबह 7:00 बजे से रात 10:00 बजे तक सातों दिन खुली रहती है! आप कभी भी बोलकर आर्डर दे सकते हैं।`;
       return NextResponse.json({
         success: true,
@@ -320,7 +420,7 @@ export async function POST(req: Request) {
       });
     }
 
-    // D) Payment Methods
+    // H) Payment Methods
     if (/(payment|kaise pay|online pay|cash on delivery|upi|qr code)/i.test(queryLower)) {
       const reply = isEnglishQuery
         ? `We accept Cash on Delivery, UPI QR scan, and local store credit (Udhaar Khata). You can choose your preferred method at checkout!`
@@ -427,21 +527,25 @@ export async function POST(req: Request) {
 
       if (newItems.length > 0) {
         const summaryItems = newItems
-          .map((it) => `${it.quantity} ${it.unit} ${it.productName} (₹${it.totalPrice})`)
-          .join(", ");
+          .map((it) => `• **${it.quantity} ${it.unit}** ${it.productName} (₹${it.totalPrice})`)
+          .join("\n");
 
         const allItems = [...currentCart, ...newItems];
         const newTotal = allItems.reduce((acc, it) => acc + it.totalPrice, 0);
 
         const reply = isEnglishQuery
-          ? `Added to your cart: ${summaryItems}. Your cart total is now ₹${newTotal}. Would you like to add anything else (like Tea, Sugar, or Spices), or confirm the order?`
-          : `मैंने आपके कार्ट में जोड़ दिया: ${summaryItems}। कुल राशि ₹${newTotal} हो गई है। क्या आपको किसी और किराना सामान (जैसे चाय, चीनी, मसाले) की ज़रूरत है, या आर्डर कन्फर्म करें?`;
+          ? `Added to your cart:\n\n${summaryItems}\n\n🛒 **Cart Total:** ₹${newTotal}\n\nWould you like to add anything else (like Tea, Sugar, or Spices), or confirm the order?`
+          : `मैंने आपके कार्ट में जोड़ दिया:\n\n${summaryItems}\n\n🛒 **कुल राशि:** ₹${newTotal}\n\nक्या आपको किसी और किराना सामान (जैसे चाय, चीनी, मसाले) की ज़रूरत है, या आर्डर कन्फर्म करें?`;
+
+        const speakText = isEnglishQuery
+          ? `Added ${newItems.map((it) => `${it.quantity} ${it.unit} ${it.productName}`).join(" and ")} to your cart. Cart total is now ₹${newTotal}. Would you like to confirm the order?`
+          : `मैंने ${newItems.map((it) => `${it.quantity} ${it.unit} ${it.productName}`).join(" और ")} आपके कार्ट में जोड़ दिया। कुल राशि ₹${newTotal} है। क्या आर्डर कन्फर्म करें?`;
 
         return NextResponse.json({
           success: true,
           intent: "ORDER_ADDED",
           reply,
-          speakText: reply,
+          speakText,
           items: newItems,
           lastDiscussedProductId: newItems[newItems.length - 1].productId,
         });
@@ -451,13 +555,16 @@ export async function POST(req: Request) {
     // =========================================================================
     // 6. INTENT: FOLLOW-UP QUANTITY FOR LAST DISCUSSED PRODUCT
     // e.g. AI asked: "Aashirvaad aata ₹265/kg hai. Kitna chahiye?" and user says "1 kg add kar do", "haan 2 packet"
-    // Strictly applies ONLY if user didn't mention a new product!
+    // Strictly applies ONLY if user didn't mention a new product AND explicitly specified quantity or affirmation!
     // =========================================================================
-    if (lastDiscussedProduct && rankedProducts.length === 0) {
-      const { qty, unit: detectedUnit } = extractQuantity(queryLower);
-      const isAffirmative = /(haan|ha|yes|add|daal do|le lo|de do|chahiye|pack)/i.test(queryLower);
+    const isGeneralQueryOrQuestion =
+      /(\?|what|who|how|kya|kyun|kaise|kaun|bhaiya|family|behan|noun|naun|naam|meaning|मतलब|परिभाषा)/i.test(queryLower);
 
-      if (qty > 0 || isAffirmative) {
+    if (lastDiscussedProduct && rankedProducts.length === 0 && !isGeneralQueryOrQuestion) {
+      const { qty, unit: detectedUnit, hasExplicitQuantity } = extractQuantity(queryLower);
+      const isAffirmative = /(haan|ha|yes|add|daal do|le lo|de do|chahiye|pack|le lena|daal dena)/i.test(queryLower);
+
+      if (hasExplicitQuantity || isAffirmative) {
         const finalUnit = detectedUnit || lastDiscussedProduct.unit;
         const lineTotal = lastDiscussedProduct.selling_price * qty;
 
@@ -476,14 +583,18 @@ export async function POST(req: Request) {
         const newSubtotal = updatedCart.reduce((sum, it) => sum + it.totalPrice, 0);
 
         const reply = isEnglishQuery
-          ? `Added ${qty} ${finalUnit} ${newItem.productName} (₹${lineTotal}) to your cart! Cart total is now ₹${newSubtotal}. Would you like anything else, or should we confirm the order?`
-          : `मैंने ${qty} ${finalUnit} ${newItem.productName} (₹${lineTotal}) आपके कार्ट में जोड़ दिया! कुल राशि ₹${newSubtotal} हो गई है। क्या कुछ और सामान जोड़ना है, या आर्डर कन्फर्म करें?`;
+          ? `Added **${qty} ${finalUnit}** ${newItem.productName} (₹${lineTotal}) to your cart!\n\n🛒 **Cart Total:** ₹${newSubtotal}\n\nWould you like anything else, or should we confirm the order?`
+          : `मैंने **${qty} ${finalUnit}** ${newItem.productName} (₹${lineTotal}) आपके कार्ट में जोड़ दिया!\n\n🛒 **कुल राशि:** ₹${newSubtotal}\n\nक्या कुछ और सामान जोड़ना है, या आर्डर कन्फर्म करें?`;
+
+        const speakText = isEnglishQuery
+          ? `Added ${qty} ${finalUnit} ${newItem.productName} to your cart. Cart total is now ₹${newSubtotal}. Would you like to confirm the order?`
+          : `मैंने ${qty} ${finalUnit} ${newItem.productName} कार्ट में जोड़ दिया। कुल राशि ₹${newSubtotal} हो गई है। क्या आर्डर कन्फर्म करें?`;
 
         return NextResponse.json({
           success: true,
           intent: "ITEM_ADDED_FOLLOWUP",
           reply,
-          speakText: reply,
+          speakText,
           items: [newItem],
           lastDiscussedProductId: null,
         });
@@ -501,7 +612,7 @@ export async function POST(req: Request) {
 
     if (isCatalogueInquiry) {
       if (isEnglishQuery) {
-        const reply = `Welcome to ${shopName}! We have all daily grocery essentials in fresh stock:\n\n• 🌾 **Flour & Grains:** Aashirvaad Chakki Atta, Fortune Basmati Rice, Rajdhani Besan, Sooji\n• 🛢️ **Oils & Ghee:** Fortune Mustard Oil, Saffola Gold, Amul Pure Desi Ghee\n• 🧈 **Dairy & Staples:** Amul Butter, Taaza Milk, Madhur Sugar, Tata Salt\n• 🍲 **Pulses & Dals:** Tata Sampann Toor Dal, Moong Dal, Chana Dal\n• ☕ **Spices & Tea:** Red Label Tea, MDH Garam Masala, Haldi, Deggi Mirch\n\nWhich item and quantity would you like to order? Just speak the item name!`;
+        const reply = `Welcome to **${shopName}**! We have all daily grocery essentials in fresh stock:\n\n• 🌾 **Flour & Grains:** Aashirvaad Chakki Atta, Fortune Basmati Rice, Rajdhani Besan, Sooji\n• 🛢️ **Oils & Ghee:** Fortune Mustard Oil, Saffola Gold, Amul Pure Desi Ghee\n• 🧈 **Dairy & Staples:** Amul Butter, Taaza Milk, Madhur Sugar, Tata Salt\n• 🍲 **Pulses & Dals:** Tata Sampann Toor Dal, Moong Dal, Chana Dal\n• ☕ **Spices & Tea:** Red Label Tea, MDH Garam Masala, Haldi, Deggi Mirch\n\nWhich item and quantity would you like to order? Just speak the item name!`;
         const speakText = `Welcome to ${shopName}! We have fresh Atta, Basmati Rice, Cooking Oils, Pure Desi Ghee, Amul Butter, Tata Salt, Madhur Sugar, Pulses, and Spices in stock. What would you like to order? Just tell me the product name and quantity!`;
 
         return NextResponse.json({
@@ -513,7 +624,7 @@ export async function POST(req: Request) {
           items: [],
         });
       } else {
-        const reply = `नमस्ते! ${shopName} में आपका स्वागत है। हमारे पास ये सभी मुख्य किराना सामान ताज़ा स्टॉक में उपलब्ध हैं:\n\n• 🌾 **आटा, चावल व अनाज:** Aashirvaad Atta, India Gate Basmati, Besan, Sooji\n• 🛢️ **तेल व देसी घी:** Fortune Mustard Oil, Saffola Gold, Amul Ghee\n• 🧈 **डेयरी व चीनी-नमक:** Taaza Milk, Amul Butter, Madhur Sugar, Tata Salt\n• 🍲 **दालें:** Toor Dal, Moong Dal, Chana Dal, Rajma, Chole\n• ☕ **मसाले व चाय:** Red Label Tea, MDH Deggi Mirch, Haldi, Garam Masala\n\nआपको इनमें से कौन सा सामान और कितनी मात्रा चाहिए? बोलकर बताइये!`;
+        const reply = `नमस्ते! **${shopName}** में आपका स्वागत है। हमारे पास ये सभी मुख्य किराना सामान ताज़ा स्टॉक में उपलब्ध हैं:\n\n• 🌾 **आटा, चावल व अनाज:** Aashirvaad Atta, India Gate Basmati, Besan, Sooji\n• 🛢️ **तेल व देसी घी:** Fortune Mustard Oil, Saffola Gold, Amul Ghee\n• 🧈 **डेयरी व चीनी-नमक:** Taaza Milk, Amul Butter, Madhur Sugar, Tata Salt\n• 🍲 **दालें:** Toor Dal, Moong Dal, Chana Dal, Rajma, Chole\n• ☕ **मसाले व चाय:** Red Label Tea, MDH Deggi Mirch, Haldi, Garam Masala\n\nआपको इनमें से कौन सा सामान और कितनी मात्रा चाहिए? बोलकर बताइये!`;
         const speakText = `Namaste! ${shopName} mein Atta, Basmati Chawal, Mustard Oil, Desi Ghee, Amul Butter, Tata Namak, Madhur Chini, Daalein aur Chai Patti sab stock mein available hain. Aapko kaun sa item aur kitna chahiye? Bolkar batayein!`;
 
         return NextResponse.json({
@@ -528,25 +639,48 @@ export async function POST(req: Request) {
     }
 
     // =========================================================================
-    // 8. NATURAL CONVERSATIONAL FALLBACK
+    // 8. GENERAL KNOWLEDGE / OFF-TOPIC QUESTIONS (Polite Redirection Without Binding Cart)
+    // =========================================================================
+    if (/(what is|who is|meaning of|kya hota hai|kise kehte hain|मतलब क्या|definition|defination)/i.test(queryLower) && rankedProducts.length === 0) {
+      const reply = isEnglishQuery
+        ? `That is an interesting question! While I am specially trained as the grocery assistant for **${shopName}**, I can help you with all kitchen staples like Atta, Dal, Oil, Milk, and Spices.\n\nWould you like to check today's prices or order something?`
+        : `यह बढ़िया सवाल है! वैसे मैं **${shopName}** का किराना सहायक हूँ, जो आपकी रसोई के सामान जैसे आटा, दाल, तेल, चाय, मसाले और दूध के आर्डर में मदद करता हूँ।\n\nक्या आपको आज घर के लिए कोई सामान मँगवाना है?`;
+
+      const speakText = isEnglishQuery
+        ? `I am the grocery assistant for ${shopName}. I can help you with Atta, Rice, Cooking Oil, Salt, Milk, and Spices. Would you like to check today's prices or order something?`
+        : `मैं ${shopName} का किराना सहायक हूँ। आटा, चावल, तेल, नमक या मसाले में से क्या मँगवाना चाहते हैं? बोलकर बताइये!`;
+
+      return NextResponse.json({
+        success: true,
+        intent: "OFF_TOPIC_CONVERSATIONAL",
+        reply,
+        speakText,
+        items: [],
+      });
+    }
+
+    // =========================================================================
+    // 9. DYNAMIC CONVERSATIONAL FALLBACK
     // =========================================================================
     if (isEnglishQuery) {
-      const defaultReply = `Hello! I am your Kirana assistant at ${shopName}. You can ask about item prices, stock, or tell me to add any grocery to your cart (for example: "1 kg sugar" or "2 bottles mustard oil"). How can I help you today?`;
+      const defaultReply = `Hello! I am your Kirana assistant at **${shopName}** 🛍️.\n\nYou can ask about item prices, stock, or tell me to add any grocery to your cart (for example: *"1 kg sugar"* or *"2 bottles mustard oil"*).\n\nHow can I help you today?`;
+      const speakText = `Hello! I am your Kirana assistant at ${shopName}. You can ask about item prices, stock, or tell me to add any grocery to your cart. How can I help you today?`;
       return NextResponse.json({
         success: true,
         intent: "GENERAL",
         reply: defaultReply,
-        speakText: defaultReply,
+        speakText,
         speakLang: "en-IN",
         items: [],
       });
     } else {
-      const defaultReply = `नमस्ते! मैं ${shopName} का AI सहायक हूँ। आप किसी भी सामान का भाव पूछ सकते हैं या सीधे आर्डर दे सकते हैं (जैसे: "दो किलो आशीर्वाद आटा और एक पैकेट नमक")। बताइये आपको क्या सामान चाहिए?`;
+      const defaultReply = `नमस्ते! मैं **${shopName}** का AI सहायक हूँ 🛒।\n\nआप किसी भी सामान का भाव पूछ सकते हैं या सीधे आर्डर दे सकते हैं (जैसे: *"दो किलो आशीर्वाद आटा और एक पैकेट नमक"*)\n\nबताइये आपको आज क्या सामान चाहिए?`;
+      const speakText = `नमस्ते! मैं ${shopName} का AI सहायक हूँ। आप किसी भी सामान का भाव पूछ सकते हैं या सीधे आर्डर दे सकते हैं। बताइये आपको क्या सामान चाहिए?`;
       return NextResponse.json({
         success: true,
         intent: "GENERAL",
         reply: defaultReply,
-        speakText: defaultReply,
+        speakText,
         speakLang: "hi-IN",
         items: [],
       });

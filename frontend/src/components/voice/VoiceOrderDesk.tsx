@@ -35,6 +35,7 @@ import {
 } from "lucide-react";
 import { ProductItem, OrderRecord } from "@/types";
 import { ApiClient } from "@/lib/api-client";
+import { ChatMessageRenderer } from "@/components/chat/ChatMessageRenderer";
 
 interface ChatMessage {
   id: string;
@@ -1293,7 +1294,7 @@ export function VoiceOrderDesk() {
                     </span>
                   </div>
 
-                  <p className="leading-relaxed font-medium whitespace-pre-line">{m.content}</p>
+                  <ChatMessageRenderer content={m.content} isUser={isUser} />
 
                   {/* Audio Replay for Assistant Messages with Gnani Model Badge */}
                   {!isUser && (
