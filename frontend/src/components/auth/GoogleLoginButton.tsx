@@ -123,19 +123,20 @@ export function GoogleLoginButton() {
           </div>
         )}
 
-        <div className="flex flex-col">
-          <span className="hidden md:inline text-xs font-bold text-slate-800 dark:text-slate-200 truncate max-w-[120px]">
-            {user.user_metadata?.full_name || user.email?.split("@")[0]}
-          </span>
-          <span
-            className={`text-[9px] font-bold px-1.5 py-0.2 rounded w-fit uppercase ${
-              isAdmin
-                ? "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300"
-                : "bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300"
-            }`}
-          >
-            {isAdmin ? "Admin (Store Owner)" : "Customer"}
-          </span>
+        <div>
+          {isAdmin ? (
+            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-black bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-300 border border-amber-300 dark:border-amber-700/60 shadow-xs">
+              <ShieldCheck className="w-3.5 h-3.5 text-amber-600" />
+              <span>Admin</span>
+            </span>
+          ) : (
+            <div className="flex flex-col">
+              <span className="hidden md:inline text-xs font-bold text-slate-800 dark:text-slate-200 truncate max-w-[120px]">
+                {user.user_metadata?.full_name || user.email?.split("@")[0] || "Customer"}
+              </span>
+              <span className="text-[10px] text-slate-400">Customer</span>
+            </div>
+          )}
         </div>
 
         {isAdmin ? (
