@@ -29,6 +29,7 @@ export const metadata: Metadata = {
 };
 
 import { RoleProvider } from "@/context/RoleContext";
+import { ThemeProvider } from "@/context/ThemeContext";
 
 export default function RootLayout({
   children,
@@ -36,18 +37,20 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className="h-full overflow-x-hidden">
-      <body className="flex flex-col min-h-full overflow-x-hidden w-full max-w-full">
-        <RoleProvider>
-          <Navbar />
-          <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-8 pb-24 md:pb-8 overflow-x-hidden">
-            {children}
-          </main>
-          <footer className="hidden md:block border-t border-slate-200 dark:border-slate-800 py-6 text-center text-xs text-slate-500">
-            VoiceOrder AI • Built for The Great Indian AI Internship Challenge by Gnani AI
-          </footer>
-          <BottomNav />
-        </RoleProvider>
+    <html lang="en" className="h-full overflow-x-hidden" suppressHydrationWarning>
+      <body className="flex flex-col min-h-full overflow-x-hidden w-full max-w-full bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 transition-colors duration-200">
+        <ThemeProvider>
+          <RoleProvider>
+            <Navbar />
+            <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-8 pb-24 md:pb-8 overflow-x-hidden">
+              {children}
+            </main>
+            <footer className="hidden md:block border-t border-slate-200 dark:border-slate-800 py-6 text-center text-xs text-slate-500">
+              VoiceOrder AI • Built for The Great Indian AI Internship Challenge by Gnani AI
+            </footer>
+            <BottomNav />
+          </RoleProvider>
+        </ThemeProvider>
       </body>
     </html>
   );

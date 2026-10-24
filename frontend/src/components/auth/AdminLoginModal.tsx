@@ -5,7 +5,7 @@ import { X, ShieldCheck, Mail, Lock } from "lucide-react";
 import { useRole } from "@/context/RoleContext";
 
 export function AdminLoginModal() {
-  const { showAdminModal, setShowAdminModal, setViewMode } = useRole();
+  const { showAdminModal, setShowAdminModal } = useRole();
   const [adminEmail, setAdminEmail] = useState("rajanprasaila@gmail.com");
   const [adminPassword, setAdminPassword] = useState("");
   const [loginError, setLoginError] = useState<string | null>(null);

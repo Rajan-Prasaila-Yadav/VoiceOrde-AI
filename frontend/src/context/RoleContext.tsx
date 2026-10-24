@@ -12,14 +12,11 @@ type RoleMode = "CUSTOMER" | "ADMIN";
 interface RoleContextType {
   user: any;
   role: RoleMode;
-  viewMode: RoleMode;
   isAdmin: boolean;
   isCustomer: boolean;
   isAuthenticatedAdmin: boolean;
   showAdminModal: boolean;
   setShowAdminModal: (show: boolean) => void;
-  toggleRole: () => void;
-  setViewMode: (mode: RoleMode) => void;
   signOut: () => Promise<void>;
   loading: boolean;
 }
@@ -27,33 +24,29 @@ interface RoleContextType {
 const RoleContext = createContext<RoleContextType>({
   user: null,
   role: "CUSTOMER",
-  viewMode: "CUSTOMER",
   isAdmin: false,
   isCustomer: true,
   isAuthenticatedAdmin: false,
   showAdminModal: false,
   setShowAdminModal: () => {},
-  toggleRole: () => {},
-  setViewMode: () => {},
   signOut: async () => {},
   loading: true,
 });
 
 export function RoleProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<any>(null);
-  const [isAuthenticatedAdmin, setIsAuthenticatedAdmin] = useState(false);
-  const [viewMode, setViewModeState] = useState<RoleMode>("CUSTOMER");
+  const [role, setRole] = useState<RoleMode>("CUSTOMER");
   const [showAdminModal, setShowAdminModal] = useState(false);
   const [loading, setLoading] = useState(true);
 
-  const checkIsAdmin = (currentUser: any) => {
+  // Checks whether the user is explicitly authenticated as Storekeeper Admin
+  const checkAdminToken = () => {
     if (typeof window !== "undefined") {
       const token = localStorage.getItem("voiceorder_admin_token");
       const storedRole = localStorage.getItem("voiceorder_user_role");
-      if (token && storedRole === "ADMIN") return true;
+      return Boolean(token && storedRole === "ADMIN");
     }
-    if (!currentUser?.email) return false;
-    return currentUser.email.toLowerCase() === "rajanprasaila@gmail.com";
+    return false;
   };
 
   useEffect(() => {
@@ -61,17 +54,13 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
     supabase.auth.getUser().then(({ data }) => {
       const currentUser = data?.user ?? null;
       setUser(currentUser);
-      const adminStatus = checkIsAdmin(currentUser);
-      setIsAuthenticatedAdmin(adminStatus);
 
-      if (adminStatus) {
-        // If authenticated admin, respect stored viewMode or default to ADMIN
-        const storedView = localStorage.getItem("voiceorder_view_mode") as RoleMode | null;
-        setViewModeState(storedView === "CUSTOMER" ? "CUSTOMER" : "ADMIN");
+      // Google Sign-In users are Customers. Storekeeper is authenticated via admin token.
+      const hasAdminToken = checkAdminToken();
+      if (hasAdminToken) {
+        setRole("ADMIN");
       } else {
-        // Non-admin or unauthenticated visitor is ALWAYS CUSTOMER
-        setViewModeState("CUSTOMER");
-        localStorage.setItem("voiceorder_view_mode", "CUSTOMER");
+        setRole("CUSTOMER");
       }
       setLoading(false);
     });
@@ -80,15 +69,12 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
     const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
       const currentUser = session?.user ?? null;
       setUser(currentUser);
-      const adminStatus = checkIsAdmin(currentUser);
-      setIsAuthenticatedAdmin(adminStatus);
 
-      if (adminStatus) {
-        const storedView = localStorage.getItem("voiceorder_view_mode") as RoleMode | null;
-        setViewModeState(storedView === "CUSTOMER" ? "CUSTOMER" : "ADMIN");
+      const hasAdminToken = checkAdminToken();
+      if (hasAdminToken) {
+        setRole("ADMIN");
       } else {
-        setViewModeState("CUSTOMER");
-        localStorage.setItem("voiceorder_view_mode", "CUSTOMER");
+        setRole("CUSTOMER");
       }
       setLoading(false);
     });
@@ -97,26 +83,6 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
       authListener.subscription.unsubscribe();
     };
   }, []);
-
-  const setViewMode = (newMode: RoleMode) => {
-    if (!isAuthenticatedAdmin && newMode === "ADMIN") {
-      // Unauthenticated user cannot switch to ADMIN - open login dialog
-      setShowAdminModal(true);
-      return;
-    }
-    setViewModeState(newMode);
-    localStorage.setItem("voiceorder_view_mode", newMode);
-  };
-
-  const toggleRole = () => {
-    if (!isAuthenticatedAdmin) {
-      // Must be logged in as Admin to enter Admin mode!
-      setShowAdminModal(true);
-      return;
-    }
-    const next = viewMode === "CUSTOMER" ? "ADMIN" : "CUSTOMER";
-    setViewMode(next);
-  };
 
   const signOut = async () => {
     try {
@@ -128,27 +94,22 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
       localStorage.removeItem("voiceorder_view_mode");
     }
     setUser(null);
-    setIsAuthenticatedAdmin(false);
-    setViewModeState("CUSTOMER");
+    setRole("CUSTOMER");
   };
 
-  // Only true if user is authenticated AND currently in ADMIN view
-  const isAdmin = isAuthenticatedAdmin && viewMode === "ADMIN";
+  const isAdmin = role === "ADMIN";
   const isCustomer = !isAdmin;
 
   return (
     <RoleContext.Provider
       value={{
         user,
-        role: isAdmin ? "ADMIN" : "CUSTOMER",
-        viewMode,
+        role,
         isAdmin,
         isCustomer,
-        isAuthenticatedAdmin,
+        isAuthenticatedAdmin: isAdmin,
         showAdminModal,
         setShowAdminModal,
-        toggleRole,
-        setViewMode,
         signOut,
         loading,
       }}

@@ -11,13 +11,12 @@ import {
   Download,
   RefreshCw,
   User,
-  ArrowLeftRight,
 } from "lucide-react";
 import { useRole } from "@/context/RoleContext";
 
 export function BottomNav() {
   const pathname = usePathname();
-  const { role, toggleRole, isAdmin, isAuthenticatedAdmin } = useRole();
+  const { isAdmin } = useRole();
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   const [isInstallable, setIsInstallable] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -72,23 +71,8 @@ export function BottomNav() {
 
   return (
     <>
-      {/* Floating Refresh, Install & Role Switcher Bar for Mobile */}
+      {/* Floating Refresh & Install Bar for Mobile */}
       <div className="md:hidden fixed bottom-16 right-3 z-40 flex items-center gap-2">
-        {/* Mobile Fast Role Toggle - Visible ONLY for Authenticated Store Admin */}
-        {isAuthenticatedAdmin && (
-          <button
-            onClick={toggleRole}
-            className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-[11px] font-bold shadow-xl backdrop-blur-md active:scale-95 transition-all border cursor-pointer ${
-              isAdmin
-                ? "bg-amber-500 text-slate-950 border-amber-400"
-                : "bg-emerald-600 text-white border-emerald-500"
-            }`}
-            title="Toggle view between Customer and Store Admin"
-          >
-            <ArrowLeftRight className="w-3 h-3" />
-            <span>{isAdmin ? "To Customer" : "To Admin"}</span>
-          </button>
-        )}
 
         <button
           onClick={handleNativeRefresh}

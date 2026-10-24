@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import {
   Mic,
   Package,
@@ -10,27 +10,17 @@ import {
   Store,
   Settings,
   User,
-  ShieldCheck,
-  ArrowLeftRight,
   LogOut,
   Lock,
 } from "lucide-react";
 import { GoogleLoginButton } from "@/components/auth/GoogleLoginButton";
 import { AdminLoginModal } from "@/components/auth/AdminLoginModal";
+import { ThemeToggle } from "@/components/layout/ThemeToggle";
 import { useRole } from "@/context/RoleContext";
 
 export function Navbar() {
   const pathname = usePathname();
-  const router = useRouter();
-  const {
-    user,
-    isAdmin,
-    isAuthenticatedAdmin,
-    viewMode,
-    toggleRole,
-    setShowAdminModal,
-    signOut,
-  } = useRole();
+  const { user, isAdmin, setShowAdminModal, signOut } = useRole();
 
   const customerLinks = [
     { label: "Voice Order Desk", href: "/", icon: Mic },
@@ -58,23 +48,9 @@ export function Navbar() {
       .catch(() => {});
   }, []);
 
-  const handleAdminModeToggle = () => {
-    if (viewMode === "ADMIN") {
-      // Switch to customer preview
-      toggleRole();
-      if (pathname.startsWith("/admin")) {
-        router.push("/");
-      }
-    } else {
-      // Switch back to admin dashboard
-      toggleRole();
-      router.push("/admin/orders");
-    }
-  };
-
   return (
     <>
-      <header className="sticky top-0 z-50 bg-white/90 dark:bg-slate-900/90 backdrop-blur-md border-b border-slate-200 dark:border-slate-800">
+      <header className="sticky top-0 z-50 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 transition-colors duration-200">
         <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-2">
           {/* Brand Logo */}
           <Link href="/" className="flex items-center gap-2.5 sm:gap-3 shrink-0">
@@ -113,43 +89,29 @@ export function Navbar() {
             })}
           </nav>
 
-          {/* Right Action Bar: Single Unified Auth & Profile Controls */}
-          <div className="flex items-center gap-2">
-            {/* 1. SCENARIO: Authenticated Store Admin (Storekeeper) */}
-            {isAuthenticatedAdmin ? (
-              <div className="flex items-center gap-2">
-                {/* Single Role Switcher Pill */}
-                <button
-                  type="button"
-                  onClick={handleAdminModeToggle}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border transition-all cursor-pointer shadow-xs ${
-                    isAdmin
-                      ? "bg-amber-50 dark:bg-amber-950/50 text-amber-900 dark:text-amber-200 border-amber-300 dark:border-amber-700/70 hover:bg-amber-100"
-                      : "bg-emerald-50 dark:bg-emerald-950/50 text-emerald-900 dark:text-emerald-200 border-emerald-300 dark:border-emerald-700/70 hover:bg-emerald-100"
-                  }`}
-                  title={
-                    isAdmin
-                      ? "Viewing as Store Admin. Click to test as Customer."
-                      : "Testing as Customer. Click to return to Admin View."
-                  }
-                >
-                  {isAdmin ? (
-                    <>
-                      <ShieldCheck className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                      <span className="hidden sm:inline">Admin Mode</span>
-                      <span className="sm:hidden">Admin</span>
-                    </>
-                  ) : (
-                    <>
-                      <User className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                      <span className="hidden sm:inline">Customer Preview</span>
-                      <span className="sm:hidden">Preview</span>
-                    </>
-                  )}
-                  <ArrowLeftRight className="w-3 h-3 text-slate-400 opacity-80" />
-                </button>
+          {/* Right Action Bar: Theme Toggle + User Profile */}
+          <div className="flex items-center gap-2 sm:gap-2.5">
+            {/* Light / Dark Mode Switcher */}
+            <ThemeToggle />
 
-                {/* Settings Link for Admin */}
+            {/* 1. Logged in as Store Admin */}
+            {isAdmin ? (
+              <div className="flex items-center gap-2 pl-1 border-l border-slate-200 dark:border-slate-800">
+                <Link
+                  href="/admin/settings"
+                  className="flex items-center gap-2 px-2.5 py-1.5 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                >
+                  <div className="w-7 h-7 rounded-full bg-amber-500 text-slate-950 flex items-center justify-center text-xs font-black shadow-xs">
+                    A
+                  </div>
+                  <div className="hidden sm:flex flex-col text-left">
+                    <span className="text-xs font-bold text-slate-900 dark:text-white">Store Admin</span>
+                    <span className="text-[10px] text-amber-600 dark:text-amber-400 font-semibold leading-none">
+                      Owner
+                    </span>
+                  </div>
+                </Link>
+
                 <Link
                   href="/admin/settings"
                   title="Store Settings"
@@ -158,7 +120,6 @@ export function Navbar() {
                   <Settings className="w-4 h-4" />
                 </Link>
 
-                {/* Sign Out */}
                 <button
                   type="button"
                   onClick={signOut}
@@ -169,8 +130,8 @@ export function Navbar() {
                 </button>
               </div>
             ) : user ? (
-              /* 2. SCENARIO: Authenticated Regular Customer (Google user) */
-              <div className="flex items-center gap-2">
+              /* 2. Logged in as Customer with Google */
+              <div className="flex items-center gap-2 pl-1 border-l border-slate-200 dark:border-slate-800">
                 <Link
                   href="/profile/complete"
                   className="flex items-center gap-2 px-2.5 py-1.5 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
@@ -183,15 +144,23 @@ export function Navbar() {
                     />
                   ) : (
                     <div className="w-7 h-7 rounded-full bg-emerald-600 text-white flex items-center justify-center text-xs font-bold">
-                      <User className="w-3.5 h-3.5" />
+                      {user.email?.[0]?.toUpperCase() || <User className="w-3.5 h-3.5" />}
                     </div>
                   )}
                   <div className="hidden sm:flex flex-col text-left">
-                    <span className="text-xs font-bold text-slate-900 dark:text-white truncate max-w-[100px]">
+                    <span className="text-xs font-bold text-slate-900 dark:text-white truncate max-w-[110px]">
                       {user.user_metadata?.full_name || user.email?.split("@")[0]}
                     </span>
                     <span className="text-[10px] text-emerald-600 font-semibold leading-none">Customer</span>
                   </div>
+                </Link>
+
+                <Link
+                  href="/profile/complete"
+                  title="My Profile"
+                  className="p-2 rounded-xl text-slate-400 hover:text-emerald-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                >
+                  <User className="w-4 h-4" />
                 </Link>
 
                 <button
@@ -204,8 +173,8 @@ export function Navbar() {
                 </button>
               </div>
             ) : (
-              /* 3. SCENARIO: Unauthenticated Visitor / Guest (NO role switcher) */
-              <div className="flex items-center gap-2">
+              /* 3. Unauthenticated Visitor / Guest */
+              <div className="flex items-center gap-2 pl-1 border-l border-slate-200 dark:border-slate-800">
                 <GoogleLoginButton />
                 <button
                   type="button"
