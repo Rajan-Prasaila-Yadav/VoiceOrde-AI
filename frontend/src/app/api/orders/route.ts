@@ -88,6 +88,11 @@ export async function POST(req: Request) {
 
     const subtotal = body.items.reduce((acc: number, it: any) => acc + Number(it.totalPrice), 0);
 
+    const finalTotal = body.totalAmount !== undefined ? Number(body.totalAmount) : subtotal;
+    const finalDiscount = Number(body.discount || 0);
+    const finalDeliveryFee = Number(body.deliveryFee || 0);
+    const finalPaymentStatus = body.paymentStatus || "UNPAID";
+
     const { data: ord, error: ordErr } = await supabase
       .from("orders")
       .insert({
@@ -99,11 +104,11 @@ export async function POST(req: Request) {
         detected_language: body.detectedLanguage || "hi-IN",
         is_voice_order: body.isVoiceOrder !== undefined ? body.isVoiceOrder : true,
         subtotal,
-        delivery_fee: 0,
-        total_amount: subtotal,
-        status: "PLACED",
+        delivery_fee: finalDeliveryFee,
+        total_amount: finalTotal,
+        status: body.status || "PLACED",
         payment_mode: body.paymentMode || "CASH",
-        payment_status: "UNPAID",
+        payment_status: finalPaymentStatus,
       })
       .select()
       .single();
@@ -155,7 +160,11 @@ export async function POST(req: Request) {
           orderNumber: ord.order_number,
           ...body,
           subtotal,
-          totalAmount: subtotal,
+          discount: finalDiscount,
+          deliveryFee: finalDeliveryFee,
+          totalAmount: finalTotal,
+          paymentMode: ord.payment_mode,
+          paymentStatus: ord.payment_status,
           status: ord.status,
           createdAt: ord.created_at,
         },

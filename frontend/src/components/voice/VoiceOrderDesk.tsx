@@ -32,9 +32,12 @@ import {
   Play,
   Pause,
   X,
+  Truck,
+  Store,
+  MapPin,
 } from "lucide-react";
 import { ProductItem, OrderRecord } from "@/types";
-import { ApiClient } from "@/lib/api-client";
+import { ApiClient, supabaseClient } from "@/lib/api-client";
 import { ChatMessageRenderer } from "@/components/chat/ChatMessageRenderer";
 
 interface ChatMessage {
@@ -147,11 +150,10 @@ export function VoiceOrderDesk() {
   const [orderItems, setOrderItems] = useState<any[]>([]);
   const [discount, setDiscount] = useState(0);
 
-  const [customerName, setCustomerName] = useState("Sunita Devi");
-  const [customerPhone, setCustomerPhone] = useState("9812345678");
-  const [deliveryAddress, setDeliveryAddress] = useState(
-    "Flat 204, Radha Krishna Apts, Main Bazaar"
-  );
+  const [customerName, setCustomerName] = useState("");
+  const [customerPhone, setCustomerPhone] = useState("");
+  const [deliveryAddress, setDeliveryAddress] = useState("");
+  const [fulfillmentType, setFulfillmentType] = useState<"DELIVERY" | "STORE_PICKUP">("DELIVERY");
   const [paymentMode, setPaymentMode] = useState<"CASH" | "UPI_QR" | "CREDIT_UDHAAR">(
     "UPI_QR"
   );
@@ -305,12 +307,48 @@ export function VoiceOrderDesk() {
       .catch((e) => console.warn("Shop settings load failed", e));
 
     // Auto-fill customer profile details if logged in
+    const syncCustomerProfile = async () => {
+      try {
+        const { data: authData } = await supabaseClient.auth.getUser();
+        const user = authData?.user;
+        if (user) {
+          const email = user.email || "";
+          if (email) {
+            const profileRes = await fetch(`/api/customer/profile?email=${encodeURIComponent(email)}`);
+            if (profileRes.ok) {
+              const prof = await profileRes.json();
+              if (prof.fullName) {
+                setCustomerName(prof.fullName);
+                localStorage.setItem("voiceorder_customer_name", prof.fullName);
+              }
+              if (prof.phone && prof.phone !== "+91") {
+                setCustomerPhone(prof.phone);
+                localStorage.setItem("voiceorder_customer_phone", prof.phone);
+              }
+              if (prof.address) {
+                setDeliveryAddress(prof.address);
+                localStorage.setItem("voiceorder_customer_address", prof.address);
+              }
+            }
+          }
+          if (user.user_metadata?.full_name || user.user_metadata?.name) {
+            const googleName = user.user_metadata?.full_name || user.user_metadata?.name;
+            setCustomerName((prev) => prev || googleName);
+            localStorage.setItem("voiceorder_customer_name", googleName);
+          }
+        }
+      } catch (err) {
+        console.warn("Could not sync customer auth session:", err);
+      }
+    };
+    syncCustomerProfile();
+
     const cachedName = localStorage.getItem("voiceorder_customer_name");
     const cachedPhone = localStorage.getItem("voiceorder_customer_phone");
     const cachedAddress = localStorage.getItem("voiceorder_customer_address");
-    if (cachedName) setCustomerName(cachedName);
-    if (cachedPhone) setCustomerPhone(cachedPhone);
-    if (cachedAddress) setDeliveryAddress(cachedAddress);
+    if (cachedName) setCustomerName((prev) => prev || cachedName);
+    if (cachedPhone) setCustomerPhone((prev) => prev || cachedPhone);
+    if (cachedAddress) setDeliveryAddress((prev) => prev || cachedAddress);
   }, []);
 
   // Filter products for quick-add picker
@@ -837,18 +875,33 @@ export function VoiceOrderDesk() {
     }
 
     try {
+      const finalCustName = customerName.trim() || "Customer";
+      const cleanDigits = customerPhone.replace(/\D/g, "");
+      if (cleanDigits.length < 10) {
+        setError("Please enter a valid 10-digit mobile number for order receipt & tracking.");
+        setProcessing(false);
+        return;
+      }
+      const finalPhone = customerPhone.startsWith("+91") ? customerPhone : `+91${cleanDigits.slice(-10)}`;
+      const finalAddress =
+        fulfillmentType === "STORE_PICKUP"
+          ? "Store Self-Pickup (दुकान से ग्राहक द्वारा पिकअप)"
+          : deliveryAddress.trim() || "Neighborhood Delivery";
+
       const sub = orderItems.reduce((acc, it) => acc + it.totalPrice, 0);
       const grandTotal = Math.max(0, sub - discount);
 
       const payload = {
         shopId: "00000000-0000-0000-0000-000000000001",
-        customerName,
-        customerPhone,
-        deliveryAddress,
+        customerName: finalCustName,
+        customerPhone: finalPhone,
+        deliveryAddress: finalAddress,
         rawTranscript: messages.map((m) => `${m.role}: ${m.content}`).join("\n"),
         detectedLanguage: selectedLanguage,
         isVoiceOrder: true,
         paymentMode,
+        paymentStatus: "UNPAID",
+        status: "PLACED",
         subtotal: sub,
         discount,
         totalAmount: grandTotal,
@@ -873,15 +926,21 @@ export function VoiceOrderDesk() {
 
       setPlacedOrder({
         ...json.data,
+        customerName: finalCustName,
+        customerPhone: finalPhone,
+        deliveryAddress: finalAddress,
         subtotal: sub,
+        discount,
         totalAmount: grandTotal,
         items: orderItems,
       });
 
-      // Save customer phone for order tracking
-      localStorage.setItem("voiceorder_customer_phone", customerPhone);
-      localStorage.setItem("voiceorder_customer_name", customerName);
-      localStorage.setItem("voiceorder_customer_address", deliveryAddress);
+      // Save customer details for seamless order tracking in my-orders
+      localStorage.setItem("voiceorder_customer_phone", finalPhone);
+      localStorage.setItem("voiceorder_customer_name", finalCustName);
+      if (fulfillmentType === "DELIVERY" && deliveryAddress.trim()) {
+        localStorage.setItem("voiceorder_customer_address", deliveryAddress.trim());
+      }
 
       // Speak confirmation back
       speakResponse(`Aapka order #${json.data.orderNumber} successfully place ho chuka hai!`);
@@ -1681,47 +1740,117 @@ export function VoiceOrderDesk() {
             </table>
           </div>
 
-          {/* Customer info & Delivery */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-4 border-t border-slate-100 dark:border-slate-800">
-            <div>
-              <label className="block text-xs font-medium text-slate-500 mb-1">Customer Name</label>
-              <input
-                type="text"
-                value={customerName}
-                onChange={(e) => setCustomerName(e.target.value)}
-                className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-slate-500 mb-1">Mobile Number (10 digits)</label>
-              <div className="flex items-center">
-                <span className="inline-flex items-center px-2.5 py-2 text-xs font-bold text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 border border-r-0 border-slate-300 dark:border-slate-700 rounded-l-xl select-none">
-                  🇮🇳 +91
-                </span>
-                <input
-                  type="text"
-                  maxLength={10}
-                  value={customerPhone.replace(/^\+91/, "").replace(/\D/g, "")}
-                  onChange={(e) => {
-                    const digits = e.target.value.replace(/\D/g, "").slice(0, 10);
-                    setCustomerPhone(`+91${digits}`);
-                  }}
-                  className="w-full px-3 py-2 text-xs font-semibold rounded-r-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                />
+          {/* Customer info, Fulfillment & Delivery */}
+          <div className="space-y-4 pt-4 border-t border-slate-100 dark:border-slate-800">
+            {/* Fulfillment Type Toggle */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-slate-50 dark:bg-slate-800/50 p-3 rounded-2xl border border-slate-200 dark:border-slate-700/60">
+              <span className="text-xs font-bold text-slate-700 dark:text-slate-200 flex items-center gap-1.5">
+                <Store className="w-4 h-4 text-emerald-600" />
+                <span>How will you receive your groceries?</span>
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setFulfillmentType("DELIVERY")}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                    fulfillmentType === "DELIVERY"
+                      ? "bg-emerald-600 text-white shadow-xs"
+                      : "bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-600"
+                  }`}
+                >
+                  <Truck className="w-3.5 h-3.5" />
+                  <span>Home Delivery (घर पर)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFulfillmentType("STORE_PICKUP")}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                    fulfillmentType === "STORE_PICKUP"
+                      ? "bg-emerald-600 text-white shadow-xs"
+                      : "bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-600"
+                  }`}
+                >
+                  <Store className="w-3.5 h-3.5" />
+                  <span>Store Self-Pickup (दुकान से)</span>
+                </button>
               </div>
             </div>
-            <div>
-              <label className="block text-xs font-medium text-slate-500 mb-1">Payment Method</label>
-              <select
-                value={paymentMode}
-                onChange={(e) => setPaymentMode(e.target.value as any)}
-                className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
-              >
-                <option value="UPI_QR">UPI QR Code</option>
-                <option value="CASH">Cash on Delivery</option>
-                <option value="CREDIT_UDHAAR">Shop Credit (Udhaar)</option>
-              </select>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div>
+                <label className="block text-xs font-medium text-slate-500 mb-1">
+                  Customer Name (ग्राहक का नाम)
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. Ramesh Kumar / Your Name"
+                  value={customerName}
+                  onChange={(e) => setCustomerName(e.target.value)}
+                  className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 focus:outline-none focus:ring-1 focus:ring-emerald-500 font-medium"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-500 mb-1">
+                  Mobile Number (10 digits)
+                </label>
+                <div className="flex items-center">
+                  <span className="inline-flex items-center px-2.5 py-2 text-xs font-bold text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 border border-r-0 border-slate-300 dark:border-slate-700 rounded-l-xl select-none">
+                    🇮🇳 +91
+                  </span>
+                  <input
+                    type="text"
+                    maxLength={10}
+                    placeholder="98XXXXXXXX"
+                    value={customerPhone.replace(/^\+91/, "").replace(/\D/g, "")}
+                    onChange={(e) => {
+                      const digits = e.target.value.replace(/\D/g, "").slice(0, 10);
+                      setCustomerPhone(`+91${digits}`);
+                    }}
+                    className="w-full px-3 py-2 text-xs font-semibold rounded-r-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-500 mb-1">
+                  Payment Method (भुगतान प्रकार)
+                </label>
+                <select
+                  value={paymentMode}
+                  onChange={(e) => setPaymentMode(e.target.value as any)}
+                  className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-medium cursor-pointer"
+                >
+                  <option value="UPI_QR">UPI QR Code (GPay / PhonePe / Paytm)</option>
+                  <option value="CASH">Cash on Delivery / Counter (नकद)</option>
+                  <option value="CREDIT_UDHAAR">Shop Credit (Udhaar Khata • उधार खाता)</option>
+                </select>
+              </div>
             </div>
+
+            {/* Delivery Address or Pickup Notice */}
+            {fulfillmentType === "DELIVERY" ? (
+              <div>
+                <label className="block text-xs font-medium text-slate-500 mb-1 flex items-center gap-1">
+                  <MapPin className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>Delivery Address (घर का पता, फ्लैट / मकान नं., लैंडमार्क)</span>
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. Flat 302, Green Valley Apartments, Near Hanuman Mandir"
+                  value={deliveryAddress}
+                  onChange={(e) => setDeliveryAddress(e.target.value)}
+                  className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                />
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 p-2.5 rounded-xl bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/60 text-xs text-amber-900 dark:text-amber-200">
+                <Store className="w-4 h-4 text-amber-600 shrink-0" />
+                <span>
+                  <strong>Store Counter Pickup Selected:</strong> Your groceries will be packed and kept ready at <strong>{shopSettings?.name || "Yadav Kirana & General Store"}</strong> counter.
+                </span>
+              </div>
+            )}
           </div>
 
           {/* Subtotal, Discount, & Grand Total Calculation */}
@@ -1807,9 +1936,34 @@ export function VoiceOrderDesk() {
               )}
             </div>
 
-            <div className="flex justify-between text-xs text-slate-500 border-b pb-2">
-              <span>Customer: {placedOrder.customerName}</span>
-              <span>{placedOrder.customerPhone}</span>
+            {/* Customer & Fulfillment Info */}
+            <div className="space-y-1.5 text-xs text-slate-600 dark:text-slate-300 border-b border-slate-100 dark:border-slate-800 pb-2.5">
+              <div className="flex justify-between items-center">
+                <span className="font-semibold text-slate-900 dark:text-white">
+                  Customer: {placedOrder.customerName || "Customer"}
+                </span>
+                <span className="font-mono text-[11px]">{placedOrder.customerPhone}</span>
+              </div>
+              <div className="flex justify-between items-center text-[11px] text-slate-500">
+                <span>Fulfillment:</span>
+                <span className="font-medium text-slate-800 dark:text-slate-200 truncate max-w-[220px]">
+                  {placedOrder.deliveryAddress || "Neighborhood Delivery"}
+                </span>
+              </div>
+              <div className="flex justify-between items-center pt-1 text-[10px]">
+                <span className="px-2 py-0.5 rounded-md font-bold bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 uppercase">
+                  Status: {placedOrder.status || "PACKING"}
+                </span>
+                <span
+                  className={`px-2 py-0.5 rounded-md font-bold uppercase ${
+                    placedOrder.paymentStatus === "PAID"
+                      ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
+                      : "bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300"
+                  }`}
+                >
+                  Payment: {placedOrder.paymentStatus || "UNPAID"} ({placedOrder.paymentMode})
+                </span>
+              </div>
             </div>
 
             <div className="space-y-2 text-xs">

@@ -39,3 +39,15 @@ ordersRouter.post("/", async (req: Request, res: Response) => {
     res.status(500).json({ success: false, error: err.message });
   }
 });
+
+// PATCH /api/orders/:id - Update status and payment status
+ordersRouter.patch("/:id", async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const updates = req.body;
+    const updated = await DatabaseService.updateOrder(id, updates);
+    res.json({ success: true, data: updated });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});

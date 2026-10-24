@@ -388,4 +388,38 @@ export class DatabaseService {
     }
     return memoryOrders;
   }
+
+  static async updateOrder(orderId: string, updates: any) {
+    if (supabase) {
+      try {
+        const updatePayload: Record<string, any> = {
+          updated_at: new Date().toISOString(),
+        };
+        if (updates.status !== undefined) updatePayload.status = updates.status;
+        if (updates.paymentStatus !== undefined) updatePayload.payment_status = updates.paymentStatus;
+        if (updates.paymentMode !== undefined) updatePayload.payment_mode = updates.paymentMode;
+        if (updates.deliveryAddress !== undefined) updatePayload.delivery_address = updates.deliveryAddress;
+        if (updates.customerName !== undefined) updatePayload.customer_name = updates.customerName;
+        if (updates.customerPhone !== undefined) updatePayload.customer_phone = updates.customerPhone;
+
+        const { data, error } = await supabase
+          .from("orders")
+          .update(updatePayload)
+          .eq("id", orderId)
+          .select()
+          .single();
+
+        if (!error && data) return data;
+      } catch (e) {
+        console.warn("[updateOrder Supabase error]:", e);
+      }
+    }
+
+    const order = memoryOrders.find((o) => o.id === orderId);
+    if (order) {
+      Object.assign(order, updates, { updatedAt: new Date().toISOString() });
+      return order;
+    }
+    return null;
+  }
 }

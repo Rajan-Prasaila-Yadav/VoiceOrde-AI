@@ -393,4 +393,51 @@ export class ApiClient {
       createdAt: ord.created_at,
     };
   }
+
+  static async updateOrder(
+    orderId: string,
+    updates: {
+      status?: string;
+      paymentStatus?: string;
+      paymentMode?: string;
+      deliveryAddress?: string;
+      customerName?: string;
+      customerPhone?: string;
+    }
+  ): Promise<any> {
+    try {
+      const res = await fetch(`${API_BASE}/orders/${orderId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updates),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        return data.data;
+      }
+    } catch (e) {
+      console.warn("[ApiClient]: Failed to patch /api/orders, falling back to direct Supabase");
+    }
+
+    // Direct Supabase fallback
+    const updatePayload: Record<string, any> = {
+      updated_at: new Date().toISOString(),
+    };
+    if (updates.status !== undefined) updatePayload.status = updates.status;
+    if (updates.paymentStatus !== undefined) updatePayload.payment_status = updates.paymentStatus;
+    if (updates.paymentMode !== undefined) updatePayload.payment_mode = updates.paymentMode;
+    if (updates.deliveryAddress !== undefined) updatePayload.delivery_address = updates.deliveryAddress;
+    if (updates.customerName !== undefined) updatePayload.customer_name = updates.customerName;
+    if (updates.customerPhone !== undefined) updatePayload.customer_phone = updates.customerPhone;
+
+    const { data, error } = await supabaseClient
+      .from("orders")
+      .update(updatePayload)
+      .eq("id", orderId)
+      .select()
+      .single();
+
+    if (error) throw error;
+    return data;
+  }
 }

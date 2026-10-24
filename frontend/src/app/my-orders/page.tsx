@@ -17,8 +17,13 @@ import {
   ArrowLeft,
   Sparkles,
   ShoppingBag,
+  Store,
+  MapPin,
+  CreditCard,
+  Banknote,
 } from "lucide-react";
 import { OrderRecord } from "@/types";
+import { supabaseClient } from "@/lib/api-client";
 
 export default function MyOrdersPage() {
   const [orders, setOrders] = useState<OrderRecord[]>([]);
@@ -29,11 +34,39 @@ export default function MyOrdersPage() {
   const [ratings, setRatings] = useState<Record<string, number>>({});
 
   useEffect(() => {
-    // 1. Load customer phone from localStorage if saved
-    const cachedPhone = localStorage.getItem("voiceorder_customer_phone") || "";
-    if (cachedPhone) {
-      setFilterPhone(cachedPhone);
-    }
+    // 1. Sync phone from Supabase auth session or localStorage
+    const syncPhone = async () => {
+      try {
+        const { data: authData } = await supabaseClient.auth.getUser();
+        const user = authData?.user;
+        if (user) {
+          const email = user.email || "";
+          if (email) {
+            const profileRes = await fetch(`/api/customer/profile?email=${encodeURIComponent(email)}`);
+            if (profileRes.ok) {
+              const prof = await profileRes.json();
+              if (prof.phone && prof.phone !== "+91") {
+                setFilterPhone(prof.phone);
+                localStorage.setItem("voiceorder_customer_phone", prof.phone);
+                return;
+              }
+            }
+          }
+          if (user.phone) {
+            setFilterPhone(user.phone);
+            localStorage.setItem("voiceorder_customer_phone", user.phone);
+            return;
+          }
+        }
+      } catch (e) {
+        console.warn("Could not sync auth session in my-orders:", e);
+      }
+      const cachedPhone = localStorage.getItem("voiceorder_customer_phone") || "";
+      if (cachedPhone) {
+        setFilterPhone(cachedPhone);
+      }
+    };
+    syncPhone();
 
     // 2. Fetch Shop Settings
     fetch("/api/shop/settings")
@@ -72,6 +105,12 @@ export default function MyOrdersPage() {
     return cleanPhone.includes(cleanFilter) || cleanFilter.includes(cleanPhone);
   });
 
+  const isPickupOrder = (order?: OrderRecord | null) => {
+    if (!order) return false;
+    const addr = (order.deliveryAddress || "").toLowerCase();
+    return addr.includes("pickup") || addr.includes("दुकान") || addr.includes("store");
+  };
+
   const getStatusStepIndex = (status: string) => {
     switch (status) {
       case "PLACED":
@@ -89,13 +128,24 @@ export default function MyOrdersPage() {
     }
   };
 
-  const steps = [
-    { label: "Placed", desc: "Order recorded" },
-    { label: "Accepted", desc: "Store accepted" },
-    { label: "Packing", desc: "Items gathered" },
-    { label: "Dispatched", desc: "Out for delivery" },
-    { label: "Delivered", desc: "Handed over" },
-  ];
+  const getStepsForOrder = (order?: OrderRecord | null) => {
+    if (isPickupOrder(order)) {
+      return [
+        { label: "Placed", desc: "Order recorded (ऑर्डर दर्ज हुआ)" },
+        { label: "Accepted", desc: "Store accepted (स्वीकृत)" },
+        { label: "Packing", desc: "Gathering items (पैकिंग जारी)" },
+        { label: "Ready at Store", desc: "Ready for Pickup (दुकान पर तैयार)" },
+        { label: "Picked Up", desc: "Customer received (सामान प्राप्त किया)" },
+      ];
+    }
+    return [
+      { label: "Placed", desc: "Order recorded (ऑर्डर दर्ज हुआ)" },
+      { label: "Accepted", desc: "Store accepted (स्वीकृत)" },
+      { label: "Packing", desc: "Gathering items (पैकिंग जारी)" },
+      { label: "Out for Delivery", desc: "On the way (डिस्पैच / रास्ते में)" },
+      { label: "Delivered", desc: "Delivered to home (घर पहुँचाया गया)" },
+    ];
+  };
 
   const handlePrintReceipt = () => {
     window.print();
@@ -221,23 +271,62 @@ export default function MyOrdersPage() {
                     </div>
                   </div>
 
-                  {/* Status Badge */}
-                  <div className="flex items-center justify-between pt-2 border-t border-slate-100 dark:border-slate-800/80 text-xs">
-                    <span
-                      className={`px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider ${
-                        ord.status === "DELIVERED"
-                          ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
-                          : ord.status === "OUT_FOR_DELIVERY"
-                          ? "bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300"
-                          : "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300"
-                      }`}
-                    >
-                      {ord.status}
-                    </span>
+                  {/* Status, Fulfillment & Payment Badges */}
+                  <div className="flex flex-wrap items-center justify-between gap-1.5 pt-2 border-t border-slate-100 dark:border-slate-800/80 text-xs">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span
+                        className={`px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider ${
+                          ord.status === "DELIVERED"
+                            ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
+                            : ord.status === "OUT_FOR_DELIVERY"
+                            ? "bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300"
+                            : ord.status === "PACKING"
+                            ? "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300"
+                            : "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300"
+                        }`}
+                      >
+                        {isPickupOrder(ord) && ord.status === "DELIVERED"
+                          ? "Picked Up"
+                          : isPickupOrder(ord) && ord.status === "OUT_FOR_DELIVERY"
+                          ? "Ready at Store"
+                          : ord.status}
+                      </span>
 
-                    <span className="text-[11px] text-slate-500">
-                      {ord.items.length} item{ord.items.length === 1 ? "" : "s"} • {ord.paymentMode}
-                    </span>
+                      <span className="px-2 py-0.5 rounded-md text-[10px] font-semibold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 flex items-center gap-1">
+                        {isPickupOrder(ord) ? (
+                          <>
+                            <Store className="w-3 h-3 text-amber-600" />
+                            <span>Store Pickup</span>
+                          </>
+                        ) : (
+                          <>
+                            <Truck className="w-3 h-3 text-blue-600" />
+                            <span>Home Delivery</span>
+                          </>
+                        )}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-1.5">
+                      <span
+                        className={`px-2 py-0.5 rounded-md text-[10px] font-extrabold uppercase ${
+                          ord.paymentStatus === "PAID"
+                            ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800"
+                            : ord.paymentMode === "CREDIT_UDHAAR"
+                            ? "bg-purple-50 text-purple-700 dark:bg-purple-950/60 dark:text-purple-300 border border-purple-200 dark:border-purple-800"
+                            : "bg-rose-50 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300 border border-rose-200 dark:border-rose-800"
+                        }`}
+                      >
+                        {ord.paymentStatus === "PAID"
+                          ? "Paid (चुकता)"
+                          : ord.paymentMode === "CREDIT_UDHAAR"
+                          ? "Udhaar (उधार खाता)"
+                          : "Left (बकाया)"}
+                      </span>
+                      <span className="text-[11px] text-slate-500">
+                        • {ord.items.length} item{ord.items.length === 1 ? "" : "s"}
+                      </span>
+                    </div>
                   </div>
                 </div>
               );
@@ -259,21 +348,41 @@ export default function MyOrdersPage() {
                     </h3>
                   </div>
 
-                  <span
-                    className={`px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider ${
-                      selectedOrder.status === "DELIVERED"
-                        ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
-                        : "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300"
-                    }`}
-                  >
-                    {selectedOrder.status}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={`px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider ${
+                        selectedOrder.status === "DELIVERED"
+                          ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
+                          : selectedOrder.status === "OUT_FOR_DELIVERY"
+                          ? "bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300"
+                          : selectedOrder.status === "PACKING"
+                          ? "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300"
+                          : "bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-200"
+                      }`}
+                    >
+                      {isPickupOrder(selectedOrder) && selectedOrder.status === "DELIVERED"
+                        ? "Picked Up From Store"
+                        : isPickupOrder(selectedOrder) && selectedOrder.status === "OUT_FOR_DELIVERY"
+                        ? "Ready for Store Pickup"
+                        : selectedOrder.status}
+                    </span>
+
+                    <span
+                      className={`px-2.5 py-1 rounded-full text-xs font-bold uppercase ${
+                        selectedOrder.paymentStatus === "PAID"
+                          ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-200"
+                          : "bg-rose-50 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300 border border-rose-200"
+                      }`}
+                    >
+                      {selectedOrder.paymentStatus === "PAID" ? "Payment Done" : "Payment Left"}
+                    </span>
+                  </div>
                 </div>
 
                 {/* Horizontal Stepper */}
                 <div className="relative">
                   <div className="grid grid-cols-5 gap-1 text-center">
-                    {steps.map((st, idx) => {
+                    {getStepsForOrder(selectedOrder).map((st, idx) => {
                       const curIdx = getStatusStepIndex(selectedOrder.status);
                       const isComplete = idx <= curIdx;
                       const isCurrent = idx === curIdx;
@@ -413,10 +522,10 @@ export default function MyOrdersPage() {
 
                   <div className="text-right">
                     <span className="text-[10px] text-slate-400 uppercase block font-semibold">
-                      Deliver To
+                      {isPickupOrder(selectedOrder) ? "Fulfillment Mode" : "Deliver To"}
                     </span>
                     <span className="text-slate-700 dark:text-slate-300 font-medium text-[11px] block truncate">
-                      {selectedOrder.deliveryAddress || "Store Pickup"}
+                      {selectedOrder.deliveryAddress || (isPickupOrder(selectedOrder) ? "Store Self-Pickup" : "Home Delivery")}
                     </span>
                   </div>
                 </div>
@@ -483,22 +592,32 @@ export default function MyOrdersPage() {
                         Payment Mode
                       </span>
                       <span className="font-bold text-slate-800 dark:text-slate-200">
-                        {selectedOrder.paymentMode}
+                        {selectedOrder.paymentMode === "UPI_QR"
+                          ? "UPI Digital (GPay/PhonePe)"
+                          : selectedOrder.paymentMode === "CREDIT_UDHAAR"
+                          ? "Shop Udhaar Khata (उधार खाता)"
+                          : "Cash on Delivery / Counter (नकद)"}
                       </span>
                     </div>
 
                     <div className="text-right">
                       <span className="text-[10px] text-slate-400 uppercase font-semibold block">
-                        Status
+                        Payment Status
                       </span>
                       <span
-                        className={`font-bold px-2 py-0.5 rounded text-[10px] uppercase ${
+                        className={`font-bold px-2.5 py-0.5 rounded text-[10px] uppercase ${
                           selectedOrder.paymentStatus === "PAID"
                             ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
+                            : selectedOrder.paymentMode === "CREDIT_UDHAAR"
+                            ? "bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300"
                             : "bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300"
                         }`}
                       >
-                        {selectedOrder.paymentStatus}
+                        {selectedOrder.paymentStatus === "PAID"
+                          ? "Payment Done (चुकता)"
+                          : selectedOrder.paymentMode === "CREDIT_UDHAAR"
+                          ? "Udhaar Recorded (उधार में लिखा गया)"
+                          : "Payment Left (बकाया • देय)"}
                       </span>
                     </div>
                   </div>

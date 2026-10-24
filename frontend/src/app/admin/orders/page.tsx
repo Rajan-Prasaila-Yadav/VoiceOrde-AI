@@ -7,6 +7,7 @@ import {
   ClipboardList,
   RefreshCw,
   CheckCircle2,
+  CheckCircle,
   Clock,
   Phone,
   MapPin,
@@ -25,6 +26,9 @@ import {
   ChevronLeft,
   ChevronRight,
   Package,
+  Truck,
+  Store,
+  AlertCircle,
 } from "lucide-react";
 
 type OrderSort = "newest" | "oldest" | "amount_desc" | "amount_asc" | "items_desc";
@@ -55,6 +59,55 @@ export default function OrdersPage() {
       console.warn("Failed to fetch orders:", e);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const [updatingOrderId, setUpdatingOrderId] = useState<string | null>(null);
+
+  const isPickupOrder = (order?: OrderRecord | null) => {
+    if (!order) return false;
+    const addr = (order.deliveryAddress || "").toLowerCase();
+    return addr.includes("pickup") || addr.includes("दुकान") || addr.includes("store");
+  };
+
+  const handleUpdateOrderStatus = async (
+    orderId: string,
+    newStatus: "PLACED" | "ACCEPTED" | "PACKING" | "OUT_FOR_DELIVERY" | "DELIVERED" | "CANCELLED"
+  ) => {
+    setUpdatingOrderId(orderId);
+    try {
+      await ApiClient.updateOrder(orderId, { status: newStatus });
+      setOrders((prev) =>
+        prev.map((o) => (o.id === orderId ? { ...o, status: newStatus } : o))
+      );
+    } catch (err: any) {
+      alert("Failed to update status: " + err.message);
+    } finally {
+      setUpdatingOrderId(null);
+    }
+  };
+
+  const handleUpdatePaymentStatus = async (
+    orderId: string,
+    paymentStatus: "UNPAID" | "PAID" | "PARTIALLY_PAID",
+    paymentMode?: "CASH" | "UPI_QR" | "CREDIT_UDHAAR"
+  ) => {
+    setUpdatingOrderId(orderId);
+    try {
+      const payload: any = { paymentStatus };
+      if (paymentMode) payload.paymentMode = paymentMode;
+      await ApiClient.updateOrder(orderId, payload);
+      setOrders((prev) =>
+        prev.map((o) =>
+          o.id === orderId
+            ? { ...o, paymentStatus, ...(paymentMode ? { paymentMode } : {}) }
+            : o
+        )
+      );
+    } catch (err: any) {
+      alert("Failed to update payment: " + err.message);
+    } finally {
+      setUpdatingOrderId(null);
     }
   };
 
@@ -550,18 +603,69 @@ export default function OrdersPage() {
                   className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm space-y-4 hover:border-slate-300 dark:hover:border-slate-700 transition-colors"
                 >
                   <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 pb-3 border-b border-slate-100 dark:border-slate-800">
-                    <div className="flex items-center gap-2.5 flex-wrap">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <span className="font-extrabold text-base text-slate-900 dark:text-white">
                         Order #{order.orderNumber}
                       </span>
-                      <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
-                        {order.status}
+
+                      {/* Status Badge */}
+                      <span
+                        className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wider ${
+                          order.status === "DELIVERED"
+                            ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
+                            : order.status === "OUT_FOR_DELIVERY"
+                            ? "bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300"
+                            : order.status === "PACKING"
+                            ? "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300"
+                            : order.status === "CANCELLED"
+                            ? "bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300"
+                            : "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300"
+                        }`}
+                      >
+                        {isPickupOrder(order) && order.status === "DELIVERED"
+                          ? "Picked Up from Store"
+                          : isPickupOrder(order) && order.status === "OUT_FOR_DELIVERY"
+                          ? "Ready at Store"
+                          : order.status}
                       </span>
-                      <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300 flex items-center gap-1">
+
+                      {/* Fulfillment Badge */}
+                      <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 flex items-center gap-1">
+                        {isPickupOrder(order) ? (
+                          <>
+                            <Store className="w-3 h-3 text-amber-600" />
+                            <span>Store Pickup</span>
+                          </>
+                        ) : (
+                          <>
+                            <Truck className="w-3 h-3 text-blue-600" />
+                            <span>Home Delivery</span>
+                          </>
+                        )}
+                      </span>
+
+                      {/* Payment Status & Mode Badge */}
+                      <span
+                        className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold flex items-center gap-1 ${
+                          order.paymentStatus === "PAID"
+                            ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
+                            : order.paymentMode === "CREDIT_UDHAAR"
+                            ? "bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300"
+                            : "bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300"
+                        }`}
+                      >
                         {order.paymentMode === "UPI_QR" && <QrCode className="w-3 h-3" />}
                         {order.paymentMode === "CASH" && <Banknote className="w-3 h-3" />}
-                        {order.paymentMode}
+                        {order.paymentMode === "CREDIT_UDHAAR" && <CreditCard className="w-3 h-3" />}
+                        <span>
+                          {order.paymentStatus === "PAID"
+                            ? `Paid (${order.paymentMode})`
+                            : order.paymentMode === "CREDIT_UDHAAR"
+                            ? "Udhaar Khata (उधार)"
+                            : `Left / Unpaid (${order.paymentMode})`}
+                        </span>
                       </span>
+
                       {order.isVoiceOrder && (
                         <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 dark:bg-emerald-950 text-emerald-600 flex items-center gap-1">
                           <Mic className="w-3 h-3" />
@@ -636,6 +740,113 @@ export default function OrdersPage() {
                     <span className="text-emerald-600 dark:text-emerald-400 text-base">
                       ₹{order.totalAmount}
                     </span>
+                  </div>
+
+                  {/* Shopkeeper Live Workflow Action Controls: Status & Payment Actions */}
+                  <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex flex-col xl:flex-row xl:items-center justify-between gap-3">
+                    {/* Status Actions */}
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mr-1">
+                        Order Status:
+                      </span>
+
+                      {order.status !== "PACKING" && order.status !== "DELIVERED" && order.status !== "CANCELLED" && (
+                        <button
+                          type="button"
+                          onClick={() => handleUpdateOrderStatus(order.id, "PACKING")}
+                          disabled={updatingOrderId === order.id}
+                          className="px-2.5 py-1 rounded-xl text-xs font-bold bg-amber-50 hover:bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-300 dark:border-amber-800 cursor-pointer disabled:opacity-50 transition-all flex items-center gap-1 shadow-2xs"
+                        >
+                          <Package className="w-3.5 h-3.5" />
+                          <span>Pack Items (पैकिंग शुरू)</span>
+                        </button>
+                      )}
+
+                      {order.status !== "OUT_FOR_DELIVERY" && order.status !== "DELIVERED" && order.status !== "CANCELLED" && (
+                        <button
+                          type="button"
+                          onClick={() => handleUpdateOrderStatus(order.id, "OUT_FOR_DELIVERY")}
+                          disabled={updatingOrderId === order.id}
+                          className="px-2.5 py-1 rounded-xl text-xs font-bold bg-blue-50 hover:bg-blue-100 text-blue-800 dark:bg-blue-950/60 dark:text-blue-300 border border-blue-300 dark:border-blue-800 cursor-pointer disabled:opacity-50 transition-all flex items-center gap-1 shadow-2xs"
+                        >
+                          {isPickupOrder(order) ? (
+                            <>
+                              <Store className="w-3.5 h-3.5" />
+                              <span>Ready for Store Pickup (दुकान पर तैयार)</span>
+                            </>
+                          ) : (
+                            <>
+                              <Truck className="w-3.5 h-3.5" />
+                              <span>Dispatch / Out for Delivery (डिस्पैच / रास्ते में)</span>
+                            </>
+                          )}
+                        </button>
+                      )}
+
+                      {order.status !== "DELIVERED" && order.status !== "CANCELLED" && (
+                        <button
+                          type="button"
+                          onClick={() => handleUpdateOrderStatus(order.id, "DELIVERED")}
+                          disabled={updatingOrderId === order.id}
+                          className="px-3 py-1 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer shadow-sm disabled:opacity-50 transition-all flex items-center gap-1"
+                        >
+                          <CheckCircle className="w-3.5 h-3.5" />
+                          <span>{isPickupOrder(order) ? "Customer Picked Up (प्राप्त किया)" : "Delivered (वितरित)"}</span>
+                        </button>
+                      )}
+
+                      {order.status !== "CANCELLED" && order.status !== "DELIVERED" && (
+                        <button
+                          type="button"
+                          onClick={() => handleUpdateOrderStatus(order.id, "CANCELLED")}
+                          disabled={updatingOrderId === order.id}
+                          className="px-2 py-1 rounded-xl text-xs font-medium text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 cursor-pointer disabled:opacity-50 transition-all"
+                        >
+                          Cancel Order
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Payment Actions */}
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mr-1">
+                        Payment:
+                      </span>
+
+                      {order.paymentStatus !== "PAID" ? (
+                        <button
+                          type="button"
+                          onClick={() => handleUpdatePaymentStatus(order.id, "PAID")}
+                          disabled={updatingOrderId === order.id}
+                          className="px-2.5 py-1 rounded-xl text-xs font-bold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800 cursor-pointer disabled:opacity-50 transition-all flex items-center gap-1 shadow-2xs"
+                        >
+                          <IndianRupee className="w-3.5 h-3.5" />
+                          <span>Mark Paid (भुगतान प्राप्त • चुकता)</span>
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => handleUpdatePaymentStatus(order.id, "UNPAID")}
+                          disabled={updatingOrderId === order.id}
+                          className="px-2.5 py-1 rounded-xl text-xs font-bold bg-rose-50 hover:bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300 border border-rose-300 dark:border-rose-800 cursor-pointer disabled:opacity-50 transition-all flex items-center gap-1 shadow-2xs"
+                        >
+                          <Clock className="w-3.5 h-3.5" />
+                          <span>Mark as Left (बकाया)</span>
+                        </button>
+                      )}
+
+                      {order.paymentMode !== "CREDIT_UDHAAR" && (
+                        <button
+                          type="button"
+                          onClick={() => handleUpdatePaymentStatus(order.id, "UNPAID", "CREDIT_UDHAAR")}
+                          disabled={updatingOrderId === order.id}
+                          className="px-2.5 py-1 rounded-xl text-xs font-bold bg-purple-50 hover:bg-purple-100 text-purple-800 dark:bg-purple-950/60 dark:text-purple-300 border border-purple-300 dark:border-purple-800 cursor-pointer disabled:opacity-50 transition-all flex items-center gap-1 shadow-2xs"
+                        >
+                          <CreditCard className="w-3.5 h-3.5" />
+                          <span>Record as Udhaar (उधार खाता)</span>
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
               ))}
