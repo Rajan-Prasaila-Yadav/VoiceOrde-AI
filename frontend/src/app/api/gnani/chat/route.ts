@@ -71,16 +71,21 @@ export async function POST(req: Request) {
       .select("id, name, hindi_name, brand, selling_price, mrp, unit, available_stock, aliases")
       .eq("shop_id", "00000000-0000-0000-0000-000000000001");
 
-    // 2. Fetch shop settings from database
+    // 2. Fetch shop settings from database (shops table)
     const { data: shop } = await supabase
-      .from("shop_settings")
+      .from("shops")
       .select("*")
-      .eq("shop_id", "00000000-0000-0000-0000-000000000001")
+      .eq("id", "00000000-0000-0000-0000-000000000001")
       .maybeSingle();
 
-    const shopName = shop?.store_name || "Sharma Kirana Store";
-    const shopPhone = shop?.phone_number || "+91 9876543210";
-    const shopAddress = shop?.complete_address || "Shop 12, Main Bazaar";
+    const shopName = shop?.name || "Yadav Kirana & General Store";
+    const shopPhone = shop?.phone || "+919876543210";
+    const shopAddress = shop?.address || "Shop No. 12, Main Market";
+
+    // Detect language of the incoming query
+    const englishWordCount = (query.match(/[a-zA-Z]/g) || []).length;
+    const hindiWordCount = (query.match(/[\u0900-\u097F]/g) || []).length;
+    const isEnglishQuery = englishWordCount > 10 && hindiWordCount === 0;
 
     // Find the last discussed product from previous assistant message
     const lastAssistantMessage = [...conversationHistory]
@@ -91,45 +96,84 @@ export async function POST(req: Request) {
       ? (products || []).find((p: any) => p.id === lastAssistantMessage.lastDiscussedProductId)
       : null;
 
-    // 3. INTENT A: Greetings
-    const isGreeting =
-      /^(hello|hi|hey|namaste|हेलो|नमस्ते)(\s+hello|\s+hi|\s+bhaiya|\s+ji)?$/i.test(queryLower) ||
-      queryLower === "hello hello" ||
-      queryLower === "namaste bhaiya";
-
-    if (isGreeting) {
-      const reply = `Namaste! ${shopName} mein aapka swagat hai. Aapko aaj kya chahiye — Atta, Chawal, Tel, Masale ya koi aur grocery? Bolkar batayein!`;
-      return NextResponse.json({
-        success: true,
-        intent: "GREETING",
-        reply,
-        speakText: reply,
-        items: [],
-      });
-    }
-
-    // 4. INTENT B: Catalogue Inquiry ("What are the items available?")
+    // 3. INTENT B (High Priority): Catalogue Inquiry ("What are the items available?")
+    // Handles English, Hindi, and phonetic STT misrecognitions (e.g. "sarvakya nastu", "sarva vastu")
     const isCatalogueInquiry =
-      /(what are the items|what items|items available|kya kya items|kya kya milta|kya kya hai|kya kya samaan|samaan kya|kya stock hai|products available|list of items|all items|koun koun sa|what do you have|inventory)/i.test(
+      /(what are the items|what items|items available|products available|available products|available items|what is available|what's available|what do you have|what do you sell|what can i buy|list of items|list products|all items|show items|show catalogue|store items|shop items|inventory)/i.test(
         queryLower
-      );
+      ) ||
+      /(kya kya|kya milta|kya hai|kya samaan|samaan kya|kya stock|koun koun sa|kaun kaun sa|uplabdh|sarva|vastu|nastu|sarvakya)/i.test(
+        queryLower
+      ) ||
+      (queryLower.includes("available") &&
+        (queryLower.includes("item") ||
+          queryLower.includes("store") ||
+          queryLower.includes("shop") ||
+          queryLower.includes("product") ||
+          queryLower.includes("stock"))) ||
+      (queryLower.includes("kya") &&
+        (queryLower.includes("samaan") ||
+          queryLower.includes("item") ||
+          queryLower.includes("milta") ||
+          queryLower.includes("dukan") ||
+          queryLower.includes("store")));
 
     if (isCatalogueInquiry) {
-      const inStock = (products || []).filter((p: any) => p.available_stock > 0);
-      const topItems = inStock
-        .slice(0, 6)
-        .map((p: any) => `${p.brand ? p.brand + " " : ""}${p.name} (₹${p.selling_price})`)
-        .join(", ");
+      if (isEnglishQuery) {
+        const reply = `Welcome to ${shopName}! We have all daily grocery essentials in fresh stock:\n\n• 🌾 **Flour & Grains:** Aashirvaad Chakki Atta, Fortune Basmati Rice, Rajdhani Besan, Sooji\n• 🛢️ **Oils & Ghee:** Fortune Mustard Oil, Saffola Gold, Amul Pure Desi Ghee\n• 🧈 **Dairy & Staples:** Amul Butter, Cow Milk, Madhur Sugar, Tata Salt\n• 🍲 **Pulses & Dals:** Tata Sampann Toor Dal, Moong Dal, Chana Dal\n• ☕ **Spices & Tea:** Red Label Tea, Everest Garam Masala, Turmeric, Chilli Powder\n\nWhich item and quantity would you like to order? Just speak the item name!`;
+        const speakText = `Welcome to ${shopName}! We have fresh Atta, Basmati Rice, Cooking Oils, Pure Desi Ghee, Amul Butter, Tata Salt, Sugar, Pulses, and Spices in stock. What would you like to order? Just tell me the product name and quantity!`;
 
-      const reply = `Haanji! ${shopName} mein Atta, Basmati Rice, Mustard Oil, Amul Butter, Ghee, Tata Salt, Madhur Sugar, Toor Dal, Everest Masala aur Red Label Tea stock mein available hain. Top items: ${topItems}. Aapko kaun sa item aur kitna chahiye?`;
+        return NextResponse.json({
+          success: true,
+          intent: "CATALOGUE_INQUIRY",
+          reply,
+          speakText,
+          speakLang: "en-IN",
+          items: [],
+        });
+      } else {
+        const reply = `नमस्ते! ${shopName} में आपका स्वागत है। हमारे पास ये सभी मुख्य किराना सामान ताज़ा स्टॉक में उपलब्ध हैं:\n\n• 🌾 **Atta, Chawal & Anaj:** Aashirvaad Chakki Atta, Fortune Basmati Chawal, Rajdhani Besan, Sooji\n• 🛢️ **Tel & Ghee:** Fortune Mustard Oil, Saffola Gold, Amul Pure Desi Ghee\n• 🧈 **Dairy & Staples:** Amul Butter, Taaza Milk, Madhur Chini, Tata Namak\n• 🍲 **Daal & Pulses:** Toor Dal, Moong Dal, Chana Dal, Rajma\n• ☕ **Masale & Chai:** Red Label Tea, Everest Masala, Haldi, Lal Mirch\n\nआपको इनमें से कौन सा सामान और कितनी मात्रा चाहिए? बोलकर बताइये!`;
+        const speakText = `Namaste! ${shopName} mein Atta, Basmati Chawal, Mustard Oil, Desi Ghee, Amul Butter, Tata Namak, Madhur Chini, Daalein aur Chai Patti sab stock mein available hain. Aapko kaun sa item aur kitna chahiye? Bolkar batayein!`;
 
-      return NextResponse.json({
-        success: true,
-        intent: "CATALOGUE_INQUIRY",
-        reply,
-        speakText: reply,
-        items: [],
-      });
+        return NextResponse.json({
+          success: true,
+          intent: "CATALOGUE_INQUIRY",
+          reply,
+          speakText,
+          speakLang: "hi-IN",
+          items: [],
+        });
+      }
+    }
+
+    // 4. INTENT A: Pure Greetings (Only if not asking a question or for catalogue)
+    const isGreeting =
+      /^(hello|hi|hey|namaste|हेलो|नमस्ते|pranam)(\s+(hello|hi|bhaiya|ji|sir|madam))?$/i.test(
+        queryLower.replace(/[!.,?]/g, "").trim()
+      );
+
+    if (isGreeting) {
+      if (isEnglishQuery) {
+        const reply = `Hello! Welcome to ${shopName}. What groceries do you need today — Flour, Rice, Oil, Ghee, Spices, Dairy, or something else? Just speak to order!`;
+        return NextResponse.json({
+          success: true,
+          intent: "GREETING",
+          reply,
+          speakText: reply,
+          speakLang: "en-IN",
+          items: [],
+        });
+      } else {
+        const reply = `Namaste! ${shopName} mein aapka swagat hai. Aapko aaj kya chahiye — Atta, Chawal, Tel, Masale ya koi aur grocery? Bolkar batayein!`;
+        return NextResponse.json({
+          success: true,
+          intent: "GREETING",
+          reply,
+          speakText: reply,
+          speakLang: "hi-IN",
+          items: [],
+        });
+      }
     }
 
     // 5. INTENT C: Customer asks for DISCOUNT (Strictly when requested by user/admin)
@@ -398,14 +442,29 @@ export async function POST(req: Request) {
     }
 
     // 11. Natural Fallback
-    const defaultReply = `Namaste! Sharma Kirana Store mein aapka swagat hai. Aap kisi bhi item ka naam aur quantity bolkar pooch sakte hain ya order de sakte hain (jaise: "दो किलो आटा और एक पैकेट बटर चाहिए").`;
-    return NextResponse.json({
-      success: true,
-      intent: "GENERAL",
-      reply: defaultReply,
-      speakText: defaultReply,
-      items: [],
-    });
+    if (isEnglishQuery) {
+      const defaultReply = `Welcome to ${shopName}! You can ask for item prices, check stock, or place an order by speaking (for example: "Give me two kilos of atta and one packet of butter"). How may I help you?`;
+      const speakText = `Welcome to ${shopName}! You can ask for item prices, check stock, or place an order by speaking. What would you like to order today?`;
+      return NextResponse.json({
+        success: true,
+        intent: "GENERAL",
+        reply: defaultReply,
+        speakText: speakText,
+        speakLang: "en-IN",
+        items: [],
+      });
+    } else {
+      const defaultReply = `नमस्ते! ${shopName} में आपका स्वागत है। आप किसी भी सामान का नाम और मात्रा बोलकर पूछ सकते हैं या आर्डर दे सकते हैं (जैसे: "दो किलो आटा और एक पैकेट बटर चाहिए")। बताइये आपको क्या चाहिए?`;
+      const speakText = `Namaste! ${shopName} mein aapka swagat hai. Aap kisi bhi item ka naam aur quantity bolkar order de sakte hain. Aapko aaj kya chahiye? Bolkar batayein!`;
+      return NextResponse.json({
+        success: true,
+        intent: "GENERAL",
+        reply: defaultReply,
+        speakText: speakText,
+        speakLang: "hi-IN",
+        items: [],
+      });
+    }
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }

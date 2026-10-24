@@ -35,6 +35,17 @@ export function Navbar() {
 
   const currentNav = isAdmin ? adminLinks : customerLinks;
 
+  const [shopName, setShopName] = React.useState("Yadav Kirana & General Store");
+
+  React.useEffect(() => {
+    fetch("/api/shop/settings")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (data?.name) setShopName(data.name);
+      })
+      .catch(() => {});
+  }, []);
+
   return (
     <header className="sticky top-0 z-50 bg-white/90 dark:bg-slate-900/90 backdrop-blur-md border-b border-slate-200 dark:border-slate-800">
       <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-2">
@@ -48,7 +59,7 @@ export function Navbar() {
               VoiceOrder AI
             </span>
             <p className="text-[10px] sm:text-[11px] text-slate-500 font-medium truncate max-w-[130px] sm:max-w-none">
-              Sharma Kirana • Live Inventory
+              {shopName} • Live Inventory
             </p>
           </div>
         </Link>

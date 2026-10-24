@@ -38,10 +38,15 @@ interface ChatMessage {
   content: string;
   time: string;
   speakText?: string;
+  speakLang?: string;
   lastDiscussedProductId?: string;
 }
 
 const SAMPLE_INTERACTIONS = [
+  {
+    label: "🏪 दुकान में क्या सामान उपलब्ध है?",
+    text: "What are the items available in the store?",
+  },
   {
     label: "❓ आटा का भाव क्या है?",
     text: "Bhaiya, Aashirvaad aata ka price aur availability kya hai?",
@@ -91,10 +96,11 @@ export function VoiceOrderDesk() {
       id: "msg-0",
       role: "assistant",
       content:
-        "Namaste! Sharma Kirana Store mein aapka swagat hai. Main aapka Kirana AI sahayak hoon. Aapko aaj kya chahiye — Atta, Chawal, Tel, Masale ya koi aur grocery? Bolkar batayein!",
+        "Namaste! Yadav Kirana & General Store mein aapka swagat hai. Main aapka Kirana AI sahayak hoon. Aapko aaj kya chahiye — Atta, Chawal, Tel, Masale ya koi aur grocery? Bolkar batayein!",
       time: "Just now",
       speakText:
-        "Namaste! Sharma Kirana Store mein aapka swagat hai. Aapko aaj kya chahiye? Bolkar batayein!",
+        "Namaste! Yadav Kirana & General Store mein aapka swagat hai. Aapko aaj kya chahiye? Bolkar batayein!",
+      speakLang: "hi-IN",
     },
   ]);
   const [isSpeaking, setIsSpeaking] = useState(false);
@@ -130,7 +136,21 @@ export function VoiceOrderDesk() {
     fetch("/api/shop/settings")
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
-        if (data) setShopSettings(data);
+        if (data) {
+          setShopSettings(data);
+          const name = data.name || "Yadav Kirana & General Store";
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === "msg-0"
+                ? {
+                    ...m,
+                    content: `Namaste! ${name} mein aapka swagat hai. Main aapka Kirana AI sahayak hoon. Aapko aaj kya chahiye — Atta, Chawal, Tel, Masale ya koi aur grocery? Bolkar batayein!`,
+                    speakText: `Namaste! ${name} mein aapka swagat hai. Aapko aaj kya chahiye? Bolkar batayein!`,
+                  }
+                : m
+            )
+          );
+        }
       })
       .catch((e) => console.warn("Shop settings load failed", e));
 
@@ -221,13 +241,41 @@ export function VoiceOrderDesk() {
     setOrderItems((prev) => prev.filter((it) => it.productId !== productId));
   };
 
-  // Text-To-Speech: Reads Kirana AI answer aloud to the customer
-  const speakResponse = (text: string) => {
+  // Text-To-Speech: Reads Kirana AI answer aloud cleanly to the customer
+  const speakResponse = (text: string, speakLang?: string) => {
     if (typeof window !== "undefined" && "speechSynthesis" in window) {
       window.speechSynthesis.cancel();
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.lang = selectedLanguage || "hi-IN";
+
+      // Clean speech text so TTS never says "dot", "bracket", "bullet", or reads symbols
+      let cleanText = text
+        .replace(/[*_#`~•]/g, " ")
+        .replace(/\([^)]*\)/g, " ") // removes anything in parentheses like (₹105)
+        .replace(/₹\s*(\d+)/g, "$1 rupaye ")
+        .replace(/₹/g, " rupaye ")
+        .replace(/https?:\/\/\S+/g, "")
+        .replace(/[\\/|]/g, " ")
+        .replace(/\s+/g, " ")
+        .replace(/\bdot\b/gi, "")
+        .replace(/\.+$/g, "") // remove trailing dot
+        .trim();
+
+      const utterance = new SpeechSynthesisUtterance(cleanText);
+
+      // Determine proper speech voice language
+      const englishLetterCount = (cleanText.match(/[a-zA-Z]/g) || []).length;
+      const hindiLetterCount = (cleanText.match(/[\u0900-\u097F]/g) || []).length;
+      const isEnglish = englishLetterCount > 20 && hindiLetterCount === 0;
+
+      if (speakLang) {
+        utterance.lang = speakLang;
+      } else if (isEnglish) {
+        utterance.lang = "en-IN";
+      } else {
+        utterance.lang = selectedLanguage || "hi-IN";
+      }
+
       utterance.rate = 1.0;
+      utterance.pitch = 1.0;
       utterance.onstart = () => setIsSpeaking(true);
       utterance.onend = () => setIsSpeaking(false);
       utterance.onerror = () => setIsSpeaking(false);
@@ -396,12 +444,13 @@ export function VoiceOrderDesk() {
           content: json.reply,
           time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
           speakText: json.speakText || json.reply,
+          speakLang: json.speakLang,
           lastDiscussedProductId: json.lastDiscussedProductId,
         };
 
         setMessages((prev) => [...prev, aiMsg]);
         // Speak response aloud to customer
-        speakResponse(json.speakText || json.reply);
+        speakResponse(json.speakText || json.reply, json.speakLang);
       }
 
       // 5. If items were detected to be added, update cart
@@ -582,7 +631,11 @@ export function VoiceOrderDesk() {
                         isUser ? "text-emerald-100" : "text-slate-400"
                       }`}
                     >
-                      {isUser ? "You (Customer)" : "Sharma Kirana AI"}
+                      {isUser
+                        ? "You (Customer)"
+                        : shopSettings?.name
+                        ? `${shopSettings.name} AI`
+                        : "Kirana AI"}
                     </span>
                     <span
                       className={`text-[10px] ${
@@ -593,13 +646,13 @@ export function VoiceOrderDesk() {
                     </span>
                   </div>
 
-                  <p className="leading-relaxed font-medium">{m.content}</p>
+                  <p className="leading-relaxed font-medium whitespace-pre-line">{m.content}</p>
 
                   {/* Audio Replay for Assistant Messages */}
                   {!isUser && (
                     <div className="pt-1 flex items-center justify-end">
                       <button
-                        onClick={() => speakResponse(m.speakText || m.content)}
+                        onClick={() => speakResponse(m.speakText || m.content, m.speakLang)}
                         className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-600 dark:text-emerald-400 hover:underline cursor-pointer"
                         title="Listen to this message again"
                       >
