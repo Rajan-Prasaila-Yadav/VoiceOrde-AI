@@ -101,7 +101,8 @@ export class GnaniProxy {
         return {
           audioBase64: base64Audio,
           mimeType: "audio/wav",
-          model: "timbre-v2.5",
+          model: selectedModel,
+          voice: selectedVoice,
           audioUrl: `data:audio/wav;base64,${base64Audio}`,
         };
       } catch (err) {

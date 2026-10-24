@@ -29,6 +29,8 @@ import {
   Share2,
   Tag,
   Check,
+  Play,
+  Pause,
 } from "lucide-react";
 import { ProductItem, OrderRecord } from "@/types";
 import { ApiClient } from "@/lib/api-client";
@@ -168,6 +170,16 @@ export function VoiceOrderDesk() {
   ]);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isGnaniVoice, setIsGnaniVoice] = useState(false);
+  const [isPlayingPreview, setIsPlayingPreview] = useState(false);
+  const [activeSpeakingModel, setActiveSpeakingModel] = useState<string>("timbre-v3.0");
+  const [activeSpeakingVoice, setActiveSpeakingVoice] = useState<string>("Shivani");
+  const [autoplayBlockedAudio, setAutoplayBlockedAudio] = useState<{
+    audioUrl: string;
+    text: string;
+    model: string;
+    voice: string;
+  } | null>(null);
+  const [loadingAudioForMsgId, setLoadingAudioForMsgId] = useState<string | null>(null);
   const [readyToConfirm, setReadyToConfirm] = useState(false);
 
   // Manual Quick Catalogue Search state
@@ -321,12 +333,106 @@ export function VoiceOrderDesk() {
     setOrderItems((prev) => prev.filter((it) => it.productId !== productId));
   };
 
-  // Text-To-Speech: Reads Kirana AI answer aloud cleanly using Gnani Timbre v2.5 Neural TTS
-  const speakResponse = async (text: string, speakLang?: string) => {
-    // Stop any currently playing audio
-    stopSpeaking();
+  // Stop TTS immediately (Barge-in / Stop voice)
+  const stopSpeaking = () => {
+    if (gnaniAudioRef.current) {
+      try {
+        gnaniAudioRef.current.pause();
+        gnaniAudioRef.current.currentTime = 0;
+      } catch (e) {}
+      gnaniAudioRef.current = null;
+    }
+    if (typeof window !== "undefined" && "speechSynthesis" in window) {
+      window.speechSynthesis.cancel();
+    }
+    setIsSpeaking(false);
+    setIsGnaniVoice(false);
+    setIsPlayingPreview(false);
+    setLoadingAudioForMsgId(null);
+  };
 
-    // Clean speech text so TTS never says "dot", "bracket", "bullet", or reads symbols
+  // Preview the selected Gnani Voice Model & Speaker directly with audio playback
+  const playVoicePreview = async (
+    modelToTest?: "timbre-v3.0" | "timbre-v2.5",
+    voiceToTest?: string
+  ) => {
+    const targetModel = modelToTest || selectedGnaniModel;
+    const targetVoice = voiceToTest || selectedGnaniVoice;
+
+    stopSpeaking();
+    setIsPlayingPreview(true);
+    setError(null);
+    setAutoplayBlockedAudio(null);
+
+    // Natural Hinglish audio sample tailored for the selected model and voice
+    const sampleText =
+      targetVoice === "Devansh" || targetVoice === "Deepak"
+        ? `Namaste! Main Gnani Timbre ${targetModel === "timbre-v3.0" ? "v3" : "v2.5"} ${targetVoice} hoon. Aapke kirana store ke order aur hisaab ke liye tayyar hoon!`
+        : `Namaste! Main Gnani Timbre ${targetModel === "timbre-v3.0" ? "v3" : "v2.5"} ${targetVoice} hoon. Yadav Kirana Store mein aapka swagat hai. Aapko aaj kya mangwana hai?`;
+
+    try {
+      const res = await fetch("/api/gnani/tts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text: sampleText,
+          language: selectedLanguage || "hi-IN",
+          voice: targetVoice,
+          model: targetModel,
+        }),
+      });
+
+      if (!res.ok) throw new Error("Voice synthesis failed for model " + targetModel);
+      const data = await res.json();
+
+      if (data.audioUrl) {
+        const audio = new Audio(data.audioUrl);
+        gnaniAudioRef.current = audio;
+        setIsSpeaking(true);
+        setIsGnaniVoice(true);
+        setActiveSpeakingModel(targetModel);
+        setActiveSpeakingVoice(targetVoice);
+
+        audio.onended = () => {
+          setIsSpeaking(false);
+          setIsGnaniVoice(false);
+          setIsPlayingPreview(false);
+          gnaniAudioRef.current = null;
+        };
+        audio.onerror = () => {
+          setIsSpeaking(false);
+          setIsGnaniVoice(false);
+          setIsPlayingPreview(false);
+          gnaniAudioRef.current = null;
+        };
+
+        await audio.play();
+      }
+    } catch (err: any) {
+      console.warn("Voice preview error:", err);
+      setError(`Voice preview error: ${err.message || "Failed to generate speech"}`);
+      setIsPlayingPreview(false);
+      setIsSpeaking(false);
+      setIsGnaniVoice(false);
+    }
+  };
+
+  // Text-To-Speech: Reads Kirana AI answer aloud cleanly using Gnani Timbre Neural Voice
+  const speakResponse = async (
+    text: string,
+    speakLang?: string,
+    forceModel?: "timbre-v3.0" | "timbre-v2.5",
+    forceVoice?: string,
+    msgId?: string
+  ) => {
+    stopSpeaking();
+    setAutoplayBlockedAudio(null);
+    if (msgId) setLoadingAudioForMsgId(msgId);
+
+    const modelToUse = forceModel || selectedGnaniModel;
+    const voiceToUse = forceVoice || selectedGnaniVoice;
+
+    // Clean speech text so TTS never says "dot", "bracket", "bullet", or reads formatting symbols
     const cleanText = text
       .replace(/[*_#`~•]/g, " ")
       .replace(/\([^)]*\)/g, " ") // removes anything in parentheses like (₹105)
@@ -339,9 +445,12 @@ export function VoiceOrderDesk() {
       .replace(/\.+$/g, "") // remove trailing dot
       .trim();
 
-    if (!cleanText) return;
+    if (!cleanText) {
+      if (msgId) setLoadingAudioForMsgId(null);
+      return;
+    }
 
-    // 1. Primary: Real Gnani AI Timbre v2.5 Neural Voice API
+    // 1. Primary: Real Gnani AI Timbre Neural Voice API
     try {
       const res = await fetch("/api/gnani/tts", {
         method: "POST",
@@ -349,8 +458,8 @@ export function VoiceOrderDesk() {
         body: JSON.stringify({
           text: cleanText,
           language: speakLang || selectedLanguage || "hi-IN",
-          voice: selectedGnaniVoice,
-          model: selectedGnaniModel,
+          voice: voiceToUse,
+          model: modelToUse,
         }),
       });
 
@@ -361,6 +470,8 @@ export function VoiceOrderDesk() {
           gnaniAudioRef.current = audio;
           setIsSpeaking(true);
           setIsGnaniVoice(true);
+          setActiveSpeakingModel(modelToUse);
+          setActiveSpeakingVoice(voiceToUse);
 
           audio.onended = () => {
             setIsSpeaking(false);
@@ -373,15 +484,33 @@ export function VoiceOrderDesk() {
             gnaniAudioRef.current = null;
           };
 
-          await audio.play();
-          return;
+          try {
+            await audio.play();
+            if (msgId) setLoadingAudioForMsgId(null);
+            return;
+          } catch (playErr: any) {
+            console.warn("[Autoplay Policy]: Browser paused audio without direct click. Showing one-tap player banner.", playErr);
+            // Autoplay paused by browser policy - expose one-tap play button so user can immediately hear Gnani audio
+            setAutoplayBlockedAudio({
+              audioUrl: data.audioUrl,
+              text: cleanText,
+              model: modelToUse,
+              voice: voiceToUse,
+            });
+            setIsSpeaking(false);
+            setIsGnaniVoice(false);
+            if (msgId) setLoadingAudioForMsgId(null);
+            return;
+          }
         }
       }
     } catch (gnaniErr) {
       console.warn("[Gnani Timbre Voice Notice]: Falling back to local synthesizer", gnaniErr);
+    } finally {
+      if (msgId) setLoadingAudioForMsgId(null);
     }
 
-    // 2. Fallback: Browser SpeechSynthesis
+    // 2. Fallback: Browser SpeechSynthesis only when network/Gnani API fails completely
     if (typeof window !== "undefined" && "speechSynthesis" in window) {
       const utterance = new SpeechSynthesisUtterance(cleanText);
 
@@ -416,20 +545,14 @@ export function VoiceOrderDesk() {
     }
   };
 
-  // Stop TTS immediately (Barge-in / Stop voice)
-  const stopSpeaking = () => {
-    if (gnaniAudioRef.current) {
-      try {
-        gnaniAudioRef.current.pause();
-        gnaniAudioRef.current.currentTime = 0;
-      } catch (e) {}
-      gnaniAudioRef.current = null;
-    }
-    if (typeof window !== "undefined" && "speechSynthesis" in window) {
-      window.speechSynthesis.cancel();
-    }
-    setIsSpeaking(false);
-    setIsGnaniVoice(false);
+  // Read full order summary aloud to customer using Gnani Timbre (Per Doc 12 & Doc 23 requirement)
+  const playOrderSummaryAloud = async () => {
+    if (orderItems.length === 0) return;
+    const itemsDescription = orderItems
+      .map((it) => `${it.quantity} ${it.unit} ${it.productName}`)
+      .join(", ");
+    const summaryText = `Aapka order hai: ${itemsDescription}. Kul rashi ${grandTotal} rupaye hai. Kya main order confirm kar doon?`;
+    await speakResponse(summaryText, selectedLanguage, selectedGnaniModel, selectedGnaniVoice);
   };
 
   // Voice recording toggle with automatic AI voice stop
@@ -786,6 +909,8 @@ export function VoiceOrderDesk() {
                             setSelectedGnaniModel(item.model);
                             setSelectedGnaniVoice(item.voice);
                             setShowVoiceDropdown(false);
+                            // Auto preview new voice so user immediately hears quality difference
+                            playVoicePreview(item.model, item.voice);
                           }}
                           className={`w-full text-left p-2.5 rounded-xl flex items-start justify-between gap-2.5 transition-all cursor-pointer ${
                             isSelected
@@ -828,7 +953,94 @@ export function VoiceOrderDesk() {
                 </div>
               )}
             </div>
+
+            {/* Direct Voice Model Preview / Test Button */}
+            <button
+              type="button"
+              onClick={() => playVoicePreview()}
+              disabled={isPlayingPreview}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border font-bold text-xs transition-all cursor-pointer shadow-xs ${
+                isPlayingPreview
+                  ? "bg-purple-600 text-white border-purple-500 animate-pulse shadow-purple-500/30 ring-2 ring-purple-400/40"
+                  : "bg-slate-900 text-white dark:bg-emerald-950/70 dark:text-emerald-200 border-slate-700 dark:border-emerald-500/40 hover:bg-slate-800 dark:hover:bg-emerald-900"
+              }`}
+              title="Test speaking quality of current Gnani model directly"
+            >
+              <Volume2 className={`w-3.5 h-3.5 ${isPlayingPreview ? "animate-bounce" : ""}`} />
+              <span>{isPlayingPreview ? "Speaking Preview..." : "Test Voice (आवाज़ सुनें)"}</span>
+            </button>
           </div>
+
+          {/* Real-time Voice Audio Visualizer Banner (Shown whenever audio is actively playing) */}
+          {(isSpeaking || isPlayingPreview) && (
+            <div className="w-full max-w-xl mx-auto bg-slate-900/95 dark:bg-slate-950/95 border border-emerald-500/50 rounded-2xl p-3 shadow-xl backdrop-blur-md flex items-center justify-between gap-3 animate-in fade-in zoom-in-95 duration-150">
+              <div className="flex items-center gap-3">
+                {/* Audio Equalizer wave bars */}
+                <div className="flex items-end gap-1 h-5 px-1">
+                  <span className="w-1 bg-emerald-400 rounded-full animate-[pulse_0.4s_ease-in-out_infinite] h-3" />
+                  <span className="w-1 bg-teal-400 rounded-full animate-[pulse_0.6s_ease-in-out_infinite] h-5" />
+                  <span className="w-1 bg-emerald-300 rounded-full animate-[pulse_0.3s_ease-in-out_infinite] h-2" />
+                  <span className="w-1 bg-teal-300 rounded-full animate-[pulse_0.5s_ease-in-out_infinite] h-4" />
+                </div>
+                <div className="text-left">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                      {isGnaniVoice ? "Gnani Timbre Active" : "Local Synthesizer"}
+                    </span>
+                    <span className="text-xs font-bold text-white">
+                      {activeSpeakingModel} • {activeSpeakingVoice}
+                    </span>
+                  </div>
+                  <span className="text-[10px] text-slate-400 block">
+                    Vachana Neural TTS • 24,000 Hz Linear PCM CD-Quality
+                  </span>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={stopSpeaking}
+                className="px-2.5 py-1 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-[11px] font-bold flex items-center gap-1 cursor-pointer transition-all shadow-xs"
+              >
+                <VolumeX className="w-3.5 h-3.5" />
+                <span>Stop</span>
+              </button>
+            </div>
+          )}
+
+          {/* Autoplay Fallback Tap Unblocker Banner (Shown when browser autoplay pauses audio) */}
+          {autoplayBlockedAudio && (
+            <div className="w-full max-w-xl mx-auto bg-amber-500/15 border border-amber-500/50 rounded-2xl p-3 flex items-center justify-between gap-3 shadow-lg animate-in fade-in">
+              <div className="flex items-center gap-2 text-left">
+                <Volume2 className="w-4 h-4 text-amber-500 animate-bounce shrink-0" />
+                <span className="text-xs font-semibold text-amber-800 dark:text-amber-200">
+                  AI Voice generated in {autoplayBlockedAudio.model} ({autoplayBlockedAudio.voice}). Tap to listen:
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  const audio = new Audio(autoplayBlockedAudio.audioUrl);
+                  gnaniAudioRef.current = audio;
+                  setIsSpeaking(true);
+                  setIsGnaniVoice(true);
+                  setActiveSpeakingModel(autoplayBlockedAudio.model);
+                  setActiveSpeakingVoice(autoplayBlockedAudio.voice);
+                  audio.onended = () => {
+                    setIsSpeaking(false);
+                    setIsGnaniVoice(false);
+                    gnaniAudioRef.current = null;
+                  };
+                  audio.play();
+                  setAutoplayBlockedAudio(null);
+                }}
+                className="px-3 py-1 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-xl shadow-xs cursor-pointer flex items-center gap-1 shrink-0"
+              >
+                <Play className="w-3 h-3 fill-white" />
+                <span>Play Voice</span>
+              </button>
+            </div>
+          )}
         </div>
 
         {/* FULL MULTI-TURN CHAT CONVERSATION THREAD */}
@@ -884,16 +1096,44 @@ export function VoiceOrderDesk() {
 
                   <p className="leading-relaxed font-medium whitespace-pre-line">{m.content}</p>
 
-                  {/* Audio Replay for Assistant Messages */}
+                  {/* Audio Replay for Assistant Messages with Gnani Model Badge */}
                   {!isUser && (
-                    <div className="pt-1 flex items-center justify-end">
+                    <div className="pt-2 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 dark:border-slate-800/60 mt-1">
+                      <div className="inline-flex items-center gap-1.5 text-[10px] text-slate-400 font-semibold">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                        <span>Gnani {selectedGnaniModel} • {selectedGnaniVoice}</span>
+                      </div>
                       <button
-                        onClick={() => speakResponse(m.speakText || m.content, m.speakLang)}
-                        className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-600 dark:text-emerald-400 hover:underline cursor-pointer"
-                        title="Listen to this message again"
+                        type="button"
+                        onClick={() =>
+                          speakResponse(
+                            m.speakText || m.content,
+                            m.speakLang,
+                            selectedGnaniModel,
+                            selectedGnaniVoice,
+                            m.id
+                          )
+                        }
+                        disabled={loadingAudioForMsgId === m.id}
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-50 dark:bg-emerald-950/60 hover:bg-emerald-100 dark:hover:bg-emerald-900 text-[11px] font-bold text-emerald-700 dark:text-emerald-300 transition-colors cursor-pointer border border-emerald-200 dark:border-emerald-800 shadow-2xs"
+                        title="Listen to this message with current Gnani voice model"
                       >
-                        <Volume2 className="w-3.5 h-3.5" />
-                        <span>Listen Again</span>
+                        {loadingAudioForMsgId === m.id ? (
+                          <>
+                            <RefreshCw className="w-3 h-3 animate-spin" />
+                            <span>Generating Gnani Audio...</span>
+                          </>
+                        ) : isSpeaking && gnaniAudioRef.current ? (
+                          <>
+                            <Volume2 className="w-3.5 h-3.5 text-emerald-600 animate-pulse" />
+                            <span>Replay ({selectedGnaniModel})</span>
+                          </>
+                        ) : (
+                          <>
+                            <Volume2 className="w-3.5 h-3.5 text-emerald-600" />
+                            <span>Listen ({selectedGnaniModel})</span>
+                          </>
+                        )}
                       </button>
                     </div>
                   )}
@@ -1301,18 +1541,31 @@ export function VoiceOrderDesk() {
               </div>
             </div>
 
-            <button
-              onClick={handleConfirmOrder}
-              disabled={processing}
-              className={`flex items-center justify-center gap-2 px-8 py-3.5 rounded-2xl text-white font-bold text-sm shadow-xl transition-all cursor-pointer disabled:opacity-50 ${
-                readyToConfirm
-                  ? "bg-emerald-600 hover:bg-emerald-700 shadow-emerald-600/40 ring-4 ring-emerald-500/30 scale-105"
-                  : "bg-slate-900 hover:bg-slate-800 dark:bg-white dark:text-slate-950 shadow-slate-900/20"
-              }`}
-            >
-              <span>Confirm Order & Deduct Stock</span>
-              <ArrowRight className="w-4 h-4" />
-            </button>
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+              <button
+                type="button"
+                onClick={playOrderSummaryAloud}
+                disabled={isSpeaking || isPlayingPreview}
+                className="flex items-center justify-center gap-2 px-5 py-3.5 rounded-2xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-100 font-bold text-xs sm:text-sm border border-slate-300 dark:border-slate-700 transition-all cursor-pointer shadow-xs disabled:opacity-50"
+                title="Read whole order items and grand total aloud using Gnani Timbre"
+              >
+                <Volume2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                <span>Read Bill Aloud (बोलकर सुनाएं)</span>
+              </button>
+
+              <button
+                onClick={handleConfirmOrder}
+                disabled={processing}
+                className={`flex items-center justify-center gap-2 px-8 py-3.5 rounded-2xl text-white font-bold text-sm shadow-xl transition-all cursor-pointer disabled:opacity-50 ${
+                  readyToConfirm
+                    ? "bg-emerald-600 hover:bg-emerald-700 shadow-emerald-600/40 ring-4 ring-emerald-500/30 scale-105"
+                    : "bg-slate-900 hover:bg-slate-800 dark:bg-white dark:text-slate-950 shadow-slate-900/20"
+                }`}
+              >
+                <span>Confirm Order & Deduct Stock</span>
+                <ArrowRight className="w-4 h-4" />
+              </button>
+            </div>
           </div>
         </div>
       )}

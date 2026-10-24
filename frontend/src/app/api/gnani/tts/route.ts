@@ -72,8 +72,9 @@ export async function POST(req: Request) {
 
           return NextResponse.json({
             success: true,
-            provider: "Gnani AI Timbre v2.5",
-            model: "timbre-v2.5",
+            provider: `Gnani AI ${selectedModel}`,
+            model: selectedModel,
+            voice: selectedVoice,
             audioBase64: base64Audio,
             mimeType: "audio/wav",
             audioUrl: `data:audio/wav;base64,${base64Audio}`,
