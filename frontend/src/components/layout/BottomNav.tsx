@@ -3,10 +3,21 @@
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Mic, Package, ClipboardList, Settings, Download, RefreshCw } from "lucide-react";
+import {
+  Mic,
+  Package,
+  ClipboardList,
+  Settings,
+  Download,
+  RefreshCw,
+  User,
+  ArrowLeftRight,
+} from "lucide-react";
+import { useRole } from "@/context/RoleContext";
 
 export function BottomNav() {
   const pathname = usePathname();
+  const { role, toggleRole, isAdmin } = useRole();
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   const [isInstallable, setIsInstallable] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -24,7 +35,9 @@ export function BottomNav() {
 
   const handleInstallClick = async () => {
     if (!deferredPrompt) {
-      alert("To install VoiceOrder AI on iOS or Chrome:\n1. Tap the Share/Menu button (⋮ or ⎋)\n2. Select 'Add to Home Screen' or 'Install App'.");
+      alert(
+        "To install VoiceOrder AI on iOS or Chrome:\n1. Tap the Share/Menu button (⋮ or ⎋)\n2. Select 'Add to Home Screen' or 'Install App'."
+      );
       return;
     }
     deferredPrompt.prompt();
@@ -42,17 +55,39 @@ export function BottomNav() {
     }, 400);
   };
 
-  const navItems = [
+  const customerNav = [
     { label: "Voice Desk", href: "/", icon: Mic },
-    { label: "Catalogue", href: "/admin/products", icon: Package },
+    { label: "My Orders", href: "/my-orders", icon: ClipboardList },
+    { label: "Profile", href: "/profile/complete", icon: User },
+  ];
+
+  const adminNav = [
+    { label: "Voice Desk", href: "/", icon: Mic },
     { label: "Orders", href: "/admin/orders", icon: ClipboardList },
+    { label: "Stock", href: "/admin/products", icon: Package },
     { label: "Settings", href: "/admin/settings", icon: Settings },
   ];
 
+  const navItems = isAdmin ? adminNav : customerNav;
+
   return (
     <>
-      {/* Floating Refresh & Install Bar for Mobile */}
+      {/* Floating Refresh, Install & Role Switcher Bar for Mobile */}
       <div className="md:hidden fixed bottom-16 right-3 z-40 flex items-center gap-2">
+        {/* Mobile Fast Role Toggle */}
+        <button
+          onClick={toggleRole}
+          className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-[11px] font-bold shadow-xl backdrop-blur-md active:scale-95 transition-all border cursor-pointer ${
+            isAdmin
+              ? "bg-amber-500 text-slate-950 border-amber-400"
+              : "bg-emerald-600 text-white border-emerald-500"
+          }`}
+          title="Toggle view between Customer and Store Admin"
+        >
+          <ArrowLeftRight className="w-3 h-3" />
+          <span>{isAdmin ? "To Customer" : "To Admin"}</span>
+        </button>
+
         <button
           onClick={handleNativeRefresh}
           className="p-2.5 rounded-full bg-slate-900/90 dark:bg-white/90 text-white dark:text-slate-900 shadow-xl backdrop-blur-md active:scale-95 transition-all border border-slate-700/50 cursor-pointer"
@@ -67,7 +102,7 @@ export function BottomNav() {
             className="flex items-center gap-1.5 px-3 py-2 rounded-full bg-emerald-600 text-white text-xs font-bold shadow-xl shadow-emerald-600/30 backdrop-blur-md active:scale-95 transition-all cursor-pointer animate-bounce"
           >
             <Download className="w-3.5 h-3.5" />
-            <span>Install App</span>
+            <span>Install</span>
           </button>
         )}
       </div>

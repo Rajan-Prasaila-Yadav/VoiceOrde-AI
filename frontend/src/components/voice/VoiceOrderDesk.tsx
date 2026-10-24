@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
+import Link from "next/link";
 import {
   Mic,
   MicOff,
@@ -19,26 +20,40 @@ import {
   ChevronDown,
   ChevronUp,
   Trash2,
+  Volume2,
+  Bot,
+  ClipboardList,
+  Printer,
+  Share2,
 } from "lucide-react";
 import { ProductItem, OrderRecord } from "@/types";
 import { ApiClient } from "@/lib/api-client";
 
-const SAMPLE_SPOKEN_ORDERS = [
+const SAMPLE_INTERACTIONS = [
   {
-    label: "आटा + बटर + चीनी",
+    type: "ORDER",
+    label: "🛒 आटा + बटर + चीनी (Order)",
     text: "दो किलो आटा, एक पैकेट अमूल बटर और एक किलो चीनी चाहिए",
   },
   {
-    label: "तेल + नमक + दाल",
+    type: "ORDER",
+    label: "🛒 तेल + नमक + दाल (Order)",
     text: "1 litre Fortune mustard oil aur ek packet Tata salt aur ek kilo toor dal",
   },
   {
-    label: "चाय + बिस्कुट + दूध",
-    text: "ek packet Red Label chai, do packet Parle G biscuit aur ek litre Amul Taaza milk",
+    type: "QUERY",
+    label: "❓ आटा का भाव क्या है?",
+    text: "Bhaiya, Aashirvaad aata ka price aur availability kya hai?",
   },
   {
-    label: "घी + गरम मसाला",
-    text: "Amul pure ghee ek litre aur ek packet Everest garam masala",
+    type: "QUERY",
+    label: "❓ क्या फॉर्च्यून तेल उपलब्ध है?",
+    text: "Kya Fortune mustard oil stock mein available hai?",
+  },
+  {
+    type: "QUERY",
+    label: "❓ दुकान कब तक खुली है?",
+    text: "Sharma Kirana store ka pata aur khulne ka samay kya hai?",
   },
 ];
 
@@ -61,10 +76,20 @@ export function VoiceOrderDesk() {
   const [error, setError] = useState<string | null>(null);
   const [shopSettings, setShopSettings] = useState<any>(null);
 
+  // Conversational Kirana AI State
+  const [aiResponse, setAiResponse] = useState<{
+    reply: string;
+    speakText: string;
+    intent?: string;
+  } | null>(null);
+  const [isSpeaking, setIsSpeaking] = useState(false);
+
   // Manual Quick Catalogue Search state
   const [showCataloguePicker, setShowCataloguePicker] = useState(false);
   const [pickerSearch, setPickerSearch] = useState("");
   const [pickerCategory, setPickerCategory] = useState("all");
+
+  const latestTranscriptRef = useRef("");
 
   // Load products to match items
   const loadProducts = async () => {
@@ -137,7 +162,7 @@ export function VoiceOrderDesk() {
           ...prev,
           {
             productId: product.id,
-            productName: `${product.brand || ""} ${product.name}`.trim(),
+            productName: `${product.brand ? product.brand + " " : ""}${product.name}`.trim(),
             unit: product.unit,
             quantity: 1,
             unitPrice: product.sellingPrice,
@@ -174,7 +199,19 @@ export function VoiceOrderDesk() {
     setOrderItems((prev) => prev.filter((it) => it.productId !== productId));
   };
 
-  const latestTranscriptRef = React.useRef("");
+  // Text-To-Speech: Reads Kirana AI answer aloud to the customer
+  const speakResponse = (text: string) => {
+    if (typeof window !== "undefined" && "speechSynthesis" in window) {
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.lang = selectedLanguage || "hi-IN";
+      utterance.rate = 1.0;
+      utterance.onstart = () => setIsSpeaking(true);
+      utterance.onend = () => setIsSpeaking(false);
+      utterance.onerror = () => setIsSpeaking(false);
+      window.speechSynthesis.speak(utterance);
+    }
+  };
 
   // Simulate audio capture or web speech
   const toggleRecording = () => {
@@ -223,12 +260,12 @@ export function VoiceOrderDesk() {
           const errType = event.error || "unknown";
           if (errType === "not-allowed") {
             setError(
-              "Microphone permission was denied. Please allow microphone in browser address bar, or use the quick sample order buttons below."
+              "Microphone permission was denied. Please allow microphone in browser address bar, or use the quick sample queries below."
             );
           } else if (errType === "no-speech") {
             setError("No speech was heard. Please speak close to your microphone or try a sample order.");
           } else if (errType === "network") {
-            setError("Speech network connection issue. You can type or use the sample orders below.");
+            setError("Speech network connection issue. You can type or use the sample queries below.");
           } else {
             console.warn("Speech recognition notice:", errType);
           }
@@ -265,7 +302,7 @@ export function VoiceOrderDesk() {
     }
   };
 
-  // Process transcript with Gnani Evon LLM & Match with Live Catalogue
+  // Conversational Engine: Asks questions or places orders using real DB & Gnani Evon LLM
   const processTranscript = async (customText?: string) => {
     const textToProcess = (typeof customText === "string" ? customText : transcript).trim();
     if (!textToProcess) return;
@@ -273,89 +310,51 @@ export function VoiceOrderDesk() {
     setError(null);
 
     try {
-      // Ensure products are loaded
-      let activeCatalogue = products;
-      if (!activeCatalogue || activeCatalogue.length === 0) {
-        try {
-          activeCatalogue = await ApiClient.getProducts();
-          if (activeCatalogue && activeCatalogue.length > 0) {
-            setProducts(activeCatalogue);
-          }
-        } catch (e) {}
-      }
-
-      const res = await fetch("/api/gnani/extract", {
+      const res = await fetch("/api/gnani/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ transcript: textToProcess }),
+        body: JSON.stringify({
+          message: textToProcess,
+          customerPhone,
+        }),
       });
 
       const json = await res.json();
-      const extracted = json.items || [];
+      if (!res.ok) throw new Error(json.error || "Failed to process query");
 
-      // Match extracted items against real catalogue products safely
-      const matched = extracted.map((ext: any) => {
-        const spoken = (ext.spokenItem || "").toLowerCase().trim();
+      if (json.reply) {
+        setAiResponse({
+          reply: json.reply,
+          speakText: json.speakText || json.reply,
+          intent: json.intent,
+        });
+        // Speak response aloud to customer
+        speakResponse(json.speakText || json.reply);
+      }
 
-        const found = (activeCatalogue || []).find((p) => {
-          const nameLower = (p.name || "").toLowerCase();
-          const hindiLower = (p.hindiName || "").toLowerCase();
-          const brandLower = (p.brand || "").toLowerCase();
-
-          // Safe alias normalization (handles string, array, or null)
-          const aliasStr = Array.isArray(p.aliases)
-            ? p.aliases.join(" ")
-            : typeof p.aliases === "string"
-            ? p.aliases
-            : "";
-          const aliasLower = aliasStr.toLowerCase();
-
-          // Direct includes checks
-          if (nameLower.includes(spoken) || spoken.includes(nameLower)) return true;
-          if (hindiLower && (hindiLower.includes(spoken) || spoken.includes(hindiLower))) return true;
-          if (brandLower && (spoken.includes(brandLower) || brandLower.includes(spoken))) return true;
-          if (aliasLower && aliasLower.includes(spoken)) return true;
-
-          // Token matching
-          const tokens = spoken.split(/\s+/).filter((t: string) => t.length > 2);
-          for (const token of tokens) {
-            if (nameLower.includes(token) || (aliasLower && aliasLower.includes(token))) {
-              return true;
+      // If items were detected to be added, update cart
+      if (json.items && json.items.length > 0) {
+        setOrderItems((prev) => {
+          const merged = [...prev];
+          for (const newItem of json.items) {
+            const idx = merged.findIndex((m) => m.productId === newItem.productId);
+            if (idx >= 0) {
+              const newQty = merged[idx].quantity + newItem.quantity;
+              merged[idx] = {
+                ...merged[idx],
+                quantity: newQty,
+                totalPrice: newQty * merged[idx].unitPrice,
+                stockError: merged[idx].availableStock < newQty,
+              };
+            } else {
+              merged.push(newItem);
             }
           }
-          return false;
+          return merged;
         });
-
-        if (found) {
-          const unitPrice = found.sellingPrice;
-          return {
-            productId: found.id,
-            productName: `${found.brand ? found.brand + " " : ""}${found.name}`.trim(),
-            unit: found.unit,
-            quantity: ext.quantity || 1,
-            unitPrice,
-            totalPrice: unitPrice * (ext.quantity || 1),
-            availableStock: found.availableStock,
-            stockError: found.availableStock < (ext.quantity || 1),
-          };
-        }
-
-        // Unmatched fallback
-        return {
-          productId: "unmatched-" + Math.random().toString(36).substring(2, 9),
-          productName: ext.spokenItem,
-          unit: ext.unit || "piece",
-          quantity: ext.quantity || 1,
-          unitPrice: 50,
-          totalPrice: 50 * (ext.quantity || 1),
-          availableStock: 10,
-          stockError: false,
-        };
-      });
-
-      setOrderItems(matched);
+      }
     } catch (err: any) {
-      setError(err.message || "Failed to process order transcript");
+      setError(err.message || "Failed to process question with Kirana AI");
     } finally {
       setProcessing(false);
     }
@@ -404,6 +403,14 @@ export function VoiceOrderDesk() {
       if (!res.ok) throw new Error(json.error || "Order placement failed");
 
       setPlacedOrder(json.data);
+      // Save customer phone for order tracking
+      localStorage.setItem("voiceorder_customer_phone", customerPhone);
+      localStorage.setItem("voiceorder_customer_name", customerName);
+      localStorage.setItem("voiceorder_customer_address", deliveryAddress);
+
+      // Speak confirmation back
+      speakResponse(`Aapka order #${json.data.orderNumber} successfully place ho chuka hai!`);
+
       // Reload products to see immediately updated (subtracted) stock!
       loadProducts();
     } catch (err: any) {
@@ -417,29 +424,29 @@ export function VoiceOrderDesk() {
 
   return (
     <div className="space-y-8">
-      {/* Voice Recorder Card */}
+      {/* Voice Recorder & Conversational AI Desk */}
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 sm:p-8 shadow-xl relative overflow-hidden">
         <div className="max-w-2xl mx-auto text-center space-y-4">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300 text-xs font-semibold">
             <Sparkles className="w-3.5 h-3.5" />
-            <span>Gnani Prisma Indian Speech Recognition & Evon LLM</span>
+            <span>Gnani AI Conversational Voice Agent • Live Database</span>
           </div>
 
           <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white">
-            Speak Your Grocery Order (बोलकर ऑर्डर दें)
+            Ask Questions or Speak Your Grocery Order (बोलकर पूछें या ऑर्डर दें)
           </h2>
           <p className="text-xs sm:text-sm text-slate-500">
-            Order naturally in Hindi, Hinglish or your regional language. The catalogue decides prices
-            and updates stock automatically in real time.
+            Ask prices, stock availability, or place orders naturally in Hindi, Hinglish or English.
+            The AI reads real store inventory and speaks back answers!
           </p>
 
-          {/* Language Selector */}
+          {/* Spoken Language Selector */}
           <div className="flex items-center justify-center gap-2">
             <span className="text-xs text-slate-500 font-medium">Spoken Language:</span>
             <select
               value={selectedLanguage}
               onChange={(e) => setSelectedLanguage(e.target.value)}
-              className="px-3 py-1 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              className="px-3 py-1 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-500 cursor-pointer"
             >
               <option value="hi-IN">Hindi (हिन्दी / Hinglish)</option>
               <option value="mr-IN">Marathi (मराठी)</option>
@@ -452,7 +459,7 @@ export function VoiceOrderDesk() {
             </select>
           </div>
 
-          {/* Big Mic Button */}
+          {/* Big Interactive Mic Button */}
           <div className="py-6 flex flex-col items-center justify-center">
             <button
               onClick={toggleRecording}
@@ -464,26 +471,66 @@ export function VoiceOrderDesk() {
             >
               {isRecording ? <MicOff className="w-10 h-10" /> : <Mic className="w-10 h-10" />}
             </button>
-            <span className="text-xs font-semibold text-slate-500 mt-3">
-              {isRecording ? "Listening... Speak your grocery items" : "Tap to Speak (बोलिए)"}
+            <span className="text-xs font-semibold text-slate-600 dark:text-slate-300 mt-3">
+              {isRecording
+                ? "Listening... Ask a question or speak your order"
+                : "Tap to Speak (बोलिए - भाव पूछें या ऑर्डर दें)"}
             </span>
           </div>
 
-          {/* Sample Prompts */}
+          {/* Conversational AI Response Speech Bubble */}
+          {aiResponse && (
+            <div className="text-left p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-950/60 dark:to-teal-950/40 border border-emerald-200 dark:border-emerald-800 space-y-2.5 shadow-sm animate-in fade-in duration-300">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-start gap-2.5">
+                  <div className="w-8 h-8 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-sm mt-0.5">
+                    <Bot className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <span className="text-[11px] font-bold text-emerald-800 dark:text-emerald-300 uppercase tracking-wider block">
+                      Sharma Kirana AI Response (लाइव जवाब)
+                    </span>
+                    <p className="text-xs sm:text-sm font-semibold text-slate-900 dark:text-slate-100 mt-0.5 leading-relaxed">
+                      {aiResponse.reply}
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => speakResponse(aiResponse.speakText || aiResponse.reply)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold shrink-0 transition-colors cursor-pointer shadow-xs ${
+                    isSpeaking
+                      ? "bg-emerald-600 text-white border-emerald-600 animate-pulse"
+                      : "bg-white dark:bg-slate-800 border-emerald-300 dark:border-emerald-700 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-50"
+                  }`}
+                  title="Hear AI speak answer aloud"
+                >
+                  <Volume2 className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">{isSpeaking ? "Speaking..." : "Listen Voice"}</span>
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Sample Questions & Orders Chips */}
           <div className="pt-2">
             <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block mb-2">
-              Try Sample Spoken Orders:
+              Try Quick Questions or Spoken Orders:
             </span>
             <div className="flex flex-wrap items-center justify-center gap-2">
-              {SAMPLE_SPOKEN_ORDERS.map((sample, idx) => (
+              {SAMPLE_INTERACTIONS.map((sample, idx) => (
                 <button
                   key={idx}
                   onClick={() => {
                     setTranscript(sample.text);
                     processTranscript(sample.text);
                   }}
-                  className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-[11px] font-semibold text-slate-700 dark:text-slate-300 hover:border-emerald-500 hover:text-emerald-600 transition-colors cursor-pointer"
-                  title="Click to instantly parse and populate items"
+                  className={`px-3 py-1.5 rounded-xl border text-[11px] font-semibold transition-all cursor-pointer ${
+                    sample.type === "QUERY"
+                      ? "border-blue-200 dark:border-blue-800/60 bg-blue-50/70 dark:bg-blue-950/30 text-blue-800 dark:text-blue-300 hover:border-blue-500"
+                      : "border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:border-emerald-500 hover:text-emerald-600"
+                  }`}
+                  title="Click to ask AI or populate order"
                 >
                   {sample.label}
                 </button>
@@ -491,12 +538,12 @@ export function VoiceOrderDesk() {
             </div>
           </div>
 
-          {/* Live Transcript Box */}
+          {/* Live Transcript / Typed Input Box */}
           <div className="space-y-3 pt-2">
             <div className="relative">
               <textarea
-                rows={3}
-                placeholder="Or type here: e.g. दो किलो आटा, एक पैकेट अमूल बटर और एक किलो चीनी..."
+                rows={2}
+                placeholder="Or type anything: e.g. आटा का भाव क्या है? or दो किलो आटा और एक पैकेट बटर चाहिए..."
                 value={transcript}
                 onChange={(e) => setTranscript(e.target.value)}
                 className="w-full p-4 rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none"
@@ -512,12 +559,12 @@ export function VoiceOrderDesk() {
                 {processing ? (
                   <>
                     <RefreshCw className="w-4 h-4 animate-spin" />
-                    <span>Processing with Gnani...</span>
+                    <span>Processing with Gnani AI...</span>
                   </>
                 ) : (
                   <>
                     <Sparkles className="w-4 h-4" />
-                    <span>Extract & Match Order</span>
+                    <span>Ask / Order with Kirana AI</span>
                   </>
                 )}
               </button>
@@ -578,7 +625,7 @@ export function VoiceOrderDesk() {
                       {prod.name}
                     </div>
                     <div className="text-[10px] text-slate-500">
-                      ₹{prod.sellingPrice} / {prod.unit}
+                      ₹{prod.sellingPrice} / {prod.unit} • Stock: {prod.availableStock}
                     </div>
                   </div>
                   <button
@@ -608,14 +655,14 @@ export function VoiceOrderDesk() {
           <div className="flex items-center justify-between pb-4 border-b border-slate-100 dark:border-slate-800">
             <div>
               <h3 className="text-lg font-bold text-slate-900 dark:text-white">
-                Review Matched Items & Prices
+                Review Matched Items & Live Bill
               </h3>
               <p className="text-xs text-slate-500">
-                Verified against shop catalogue with automatic stock check
+                Verified against store catalogue with automatic stock check
               </p>
             </div>
             <span className="text-xs font-semibold px-3 py-1 bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 rounded-full">
-              {orderItems.length} Items Identified
+              {orderItems.length} Items in Cart
             </span>
           </div>
 
@@ -651,7 +698,7 @@ export function VoiceOrderDesk() {
                     >
                       <Minus className="w-3.5 h-3.5" />
                     </button>
-                    <span className="font-extrabold text-xs px-1">
+                    <span className="text-xs font-bold px-2">
                       {item.quantity} {item.unit}
                     </span>
                     <button
@@ -663,80 +710,84 @@ export function VoiceOrderDesk() {
                   </div>
 
                   <div className="text-right">
-                    <div className="text-[10px] text-slate-400">Total</div>
-                    <div className="text-sm font-black text-emerald-600 dark:text-emerald-400">
+                    <span className="font-extrabold text-sm text-slate-900 dark:text-white">
                       ₹{item.totalPrice}
-                    </div>
+                    </span>
                   </div>
                 </div>
 
-                <div className="text-[11px]">
-                  {item.stockError ? (
-                    <span className="text-rose-600 font-bold">
-                      ⚠️ Exceeds Stock ({item.availableStock} available)
-                    </span>
-                  ) : (
-                    <span className="text-emerald-600 font-semibold flex items-center gap-1">
-                      <CheckCircle className="w-3.5 h-3.5" />
-                      In stock ({item.availableStock} avail)
-                    </span>
-                  )}
-                </div>
+                {item.stockError && (
+                  <div className="text-[11px] font-semibold text-rose-600 flex items-center gap-1">
+                    <AlertCircle className="w-3.5 h-3.5" />
+                    <span>Only {item.availableStock} in stock!</span>
+                  </div>
+                )}
               </div>
             ))}
           </div>
 
-          {/* Desktop Table (>= sm screens) */}
-          <div className="hidden sm:block overflow-x-auto">
-            <table className="w-full text-left text-sm">
-              <thead className="bg-slate-50 dark:bg-slate-800/50 text-slate-500 text-xs uppercase">
+          {/* Desktop Table Layout (>= sm screens) */}
+          <div className="hidden sm:block border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden">
+            <table className="w-full text-left border-collapse text-xs">
+              <thead className="bg-slate-50 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-800">
                 <tr>
-                  <th className="p-3">Product Name</th>
-                  <th className="p-3">Quantity</th>
-                  <th className="p-3">Price / Unit</th>
-                  <th className="p-3">Total</th>
-                  <th className="p-3">Stock Check</th>
-                  <th className="p-3 text-right">Remove</th>
+                  <th className="p-3 font-semibold text-slate-600 dark:text-slate-400">Product</th>
+                  <th className="p-3 text-center font-semibold text-slate-600 dark:text-slate-400">
+                    Quantity
+                  </th>
+                  <th className="p-3 text-right font-semibold text-slate-600 dark:text-slate-400">
+                    Unit Price
+                  </th>
+                  <th className="p-3 text-right font-semibold text-slate-600 dark:text-slate-400">
+                    Total
+                  </th>
+                  <th className="p-3 text-center font-semibold text-slate-600 dark:text-slate-400">
+                    Stock
+                  </th>
+                  <th className="p-3 text-right font-semibold text-slate-600 dark:text-slate-400">
+                    Action
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                 {orderItems.map((item, idx) => (
-                  <tr key={idx} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/30">
-                    <td className="p-3 font-semibold text-slate-900 dark:text-slate-100">
+                  <tr key={idx} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/40">
+                    <td className="p-3 font-medium text-slate-900 dark:text-white">
                       {item.productName}
                     </td>
-                    <td className="p-3">
-                      <div className="flex items-center gap-2">
+                    <td className="p-3 text-center">
+                      <div className="inline-flex items-center gap-2 border border-slate-200 dark:border-slate-700 rounded-lg p-1 bg-white dark:bg-slate-800">
                         <button
                           onClick={() => handleUpdateItemQty(item.productId, -1)}
-                          className="w-6 h-6 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-600 flex items-center justify-center cursor-pointer"
+                          className="w-5 h-5 flex items-center justify-center text-slate-500 hover:text-slate-900 cursor-pointer"
                         >
                           <Minus className="w-3 h-3" />
                         </button>
-                        <span className="font-bold text-xs">
+                        <span className="font-bold px-1">
                           {item.quantity} {item.unit}
                         </span>
                         <button
                           onClick={() => handleUpdateItemQty(item.productId, 1)}
-                          className="w-6 h-6 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-600 flex items-center justify-center cursor-pointer"
+                          className="w-5 h-5 flex items-center justify-center text-slate-500 hover:text-slate-900 cursor-pointer"
                         >
                           <Plus className="w-3 h-3" />
                         </button>
                       </div>
                     </td>
-                    <td className="p-3 text-slate-500 text-xs">₹{item.unitPrice}</td>
-                    <td className="p-3 font-bold text-emerald-600 dark:text-emerald-400 text-xs">
+                    <td className="p-3 text-right text-slate-600 dark:text-slate-400">
+                      ₹{item.unitPrice}
+                    </td>
+                    <td className="p-3 text-right font-bold text-slate-900 dark:text-white">
                       ₹{item.totalPrice}
                     </td>
-                    <td className="p-3">
+                    <td className="p-3 text-center">
                       {item.stockError ? (
-                        <span className="text-xs text-rose-600 font-bold">
-                          Exceeds Stock ({item.availableStock} avail)
+                        <span className="text-[10px] font-bold text-rose-600 bg-rose-50 px-2 py-0.5 rounded-full">
+                          Only {item.availableStock} Left
                         </span>
                       ) : (
-                        <span className="text-xs text-emerald-600 font-semibold flex items-center gap-1">
-                          <CheckCircle className="w-3.5 h-3.5" />
-                          Available ({item.availableStock} in stock)
+                        <span className="text-[10px] text-emerald-600 font-semibold bg-emerald-50 px-2 py-0.5 rounded-full">
+                          In Stock ({item.availableStock})
                         </span>
                       )}
                     </td>
@@ -826,7 +877,7 @@ export function VoiceOrderDesk() {
               Order #{placedOrder.orderNumber} Placed Successfully!
             </h3>
             <p className="text-xs text-emerald-700 dark:text-emerald-300">
-              Catalogue stock has been automatically decremented. Total sold units updated.
+              Catalogue stock has been automatically decremented in real-time.
             </p>
           </div>
 
@@ -885,7 +936,7 @@ export function VoiceOrderDesk() {
                       shopSettings?.qrImageUrl ||
                       `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=upi://pay?pa=${encodeURIComponent(
                         shopSettings?.upiId || "sharmakirana@upi"
-                      )}&pn=SharmaKiranaStore&cu=INR`
+                      )}&pn=SharmaKiranaStore&am=${placedOrder.totalAmount}&cu=INR`
                     }
                     alt="Shop UPI QR"
                     className="w-full h-full object-contain"
@@ -898,12 +949,22 @@ export function VoiceOrderDesk() {
             )}
           </div>
 
-          <div className="text-center">
+          {/* Action buttons */}
+          <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
+            <Link
+              href="/my-orders"
+              className="px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-md shadow-emerald-600/30 transition-all cursor-pointer flex items-center gap-2"
+            >
+              <ClipboardList className="w-4 h-4" />
+              <span>Track Order & Thermal Receipt</span>
+            </Link>
+
             <button
               onClick={() => {
                 setPlacedOrder(null);
                 setOrderItems([]);
                 setTranscript("");
+                setAiResponse(null);
               }}
               className="px-6 py-2.5 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 text-xs font-bold hover:opacity-90 cursor-pointer"
             >
